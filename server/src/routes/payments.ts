@@ -17,7 +17,7 @@ import { clientIp, isEmailBlocked, isIpBlocked } from "./security";
 export const paymentsRouter = Router();
 
 const methodSchema = z.object({
-  type: z.enum(["CASH_APP", "VENMO", "ZELLE", "CHIME", "PAYPAL", "CARD", "BANK", "BTC", "LTC", "XMR", "ETH"]),
+  type: z.enum(["CASH_APP", "VENMO", "ZELLE", "CHIME", "PAYPAL", "CARD", "BANK", "BTC", "LTC", "XMR", "ETH", "USDT", "USDC", "DOGE"]),
   label: z.string().min(1).max(120),
   handle: z.string().min(1).max(200),
   details: z.record(z.string()).optional(),
@@ -81,6 +81,21 @@ function handleFormatError(type: string, handle: string): string | null {
       return /^4[0-9A-Za-z]{94}$/.test(handle) ? null : "handle must be an XMR address";
     case "ETH":
       return /^0x[a-fA-F0-9]{40}$/.test(handle) ? null : "handle must be an ETH address (0x + 40 hex chars)";
+    case "USDT":
+    case "USDC": {
+      // Stablecoins live on several chains — accept either common form
+      // and never lock to one chain: ERC-20 style (0x + 40 hex) or
+      // Tron style (T + 33 base58 chars). A 0x address is 40 hex, not
+      // 64, so it does not trip the secret check above.
+      const erc20 = /^0x[a-fA-F0-9]{40}$/.test(handle);
+      const tron = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(handle);
+      return erc20 || tron ? null : "handle must be a USDT/USDC address (0x + 40 hex, or T + 33 base58 chars)";
+    }
+    case "DOGE":
+      // Dogecoin: D prefix (P2SH: A prefix), base58, 26–34 chars total.
+      return /^[DA][a-km-zA-HJ-NP-Z1-9]{25,33}$/.test(handle)
+        ? null
+        : "handle must be a DOGE address (D or A prefix, 26–34 chars)";
     case "CARD":
       return /^\d{13,19}$/.test(handle.replace(/[\s-]/g, "")) ? null : "handle must be a card number (13–19 digits)";
     case "BANK":

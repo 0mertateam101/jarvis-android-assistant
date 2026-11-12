@@ -127,14 +127,16 @@ Body:
 { "type": "CASH_APP", "label": "Cash App — APF", "handle": "$MsCarterb",
   "details": { "note": "All Pockets Full Consulting" } }
 ```
-Types: `CASH_APP | VENMO | ZELLE | CHIME | PAYPAL | CARD | BANK | BTC | LTC | XMR | ETH`.
+Types: `CASH_APP | VENMO | ZELLE | CHIME | PAYPAL | CARD | BANK | BTC | LTC | XMR | ETH | USDT | USDC | DOGE`.
 `handle` is a public handle / URL / crypto address — never a secret.
 Anything that looks like a private key, seed phrase, mnemonic, password,
 API key, or raw 64-hex key in `handle` (or in `details`) is rejected with
 `400`. Handle format is checked loosely per type: `$username` for
 `CASH_APP` / `CHIME`, `@username` for `VENMO`, email or phone for `ZELLE` /
-`PAYPAL`, a plausible address for `BTC` / `LTC` / `XMR` / `ETH`
-(`0x` + 40 hex for `ETH`), 13–19 digits for `CARD`, at least 4 characters
+`PAYPAL`, a plausible address for `BTC` / `LTC` / `XMR` / `ETH` / `USDT` /
+`USDC` / `DOGE` (`0x` + 40 hex for `ETH`; `0x` + 40 hex or `T` + 33 base58
+chars for `USDT` / `USDC`; `D` or `A` prefix, 26–34 chars for `DOGE`),
+13–19 digits for `CARD`, at least 4 characters
 for `BANK`. A wrong format is a `400`.
 Response `201`: the `PaymentMethod`.
 

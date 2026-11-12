@@ -1,6 +1,6 @@
-# COPILOT_PROMPTS — 10 ordered prompts for GitHub Copilot Agent / VS Code Copilot
+# COPILOT_PROMPTS — 11 ordered prompts for GitHub Copilot Agent / VS Code Copilot
 
-Work through these **in order (1 → 10)**. Each prompt is copy-paste ready.
+Work through these **in order (1 → 11)**. Each prompt is copy-paste ready.
 Open the repo in VS Code with Copilot Chat (or GitHub Copilot Agent), paste
 one prompt, review the diff, run the checks it names, then move on.
 Do not skip ahead — later prompts depend on earlier ones.
@@ -161,7 +161,37 @@ Do not skip ahead — later prompts depend on earlier ones.
 
 ---
 
-## After all 10
+## Prompt 11 — Crypto payment methods: USDT, USDC, DOGE
+
+> Add three crypto payment method types — `USDT`, `USDC`, and `DOGE` —
+> to the existing crypto flow from Prompt 7. In
+> `server/src/routes/payments.ts`, add the three types to the method
+> enum (14 types total) and add loose handle checks: `USDT` / `USDC`
+> accept an ERC-20 style address (`0x` + 40 hex) **or** a Tron style
+> address (`T` + 33 base58 chars) — never lock to one chain; `DOGE`
+> accepts a `D` prefix (P2SH `A` prefix), base58, 26–34 chars total.
+> Keep the secret checks: a raw 64-hex handle is still rejected, and a
+> `0x` address (40 hex) must not trip them. In
+> `server/src/services/crypto.ts`, add the three to `CryptoCurrency`,
+> `isCryptoType`, and the simulated dev rates (`USDT: 1`, `USDC: 1`,
+> `DOGE: 0.2` — clearly fake, for UI testing only). They must get the
+> full crypto treatment automatically through the existing generic
+> paths — checkout quote, reference validation, webhook confirmation,
+> never PAID on QR scan — with no per-coin special cases in the
+> confirm / webhook paths. Add the three types to the Android hint
+> text in `MainActivity.kt` and update `docs/API.md`,
+> `docs/ARCHITECTURE.md`, and `README.md`. No schema change (method
+> type is a plain string). No real provider keys, no real money —
+> simulated mode only. Extend `server/scripts/payments-test.sh` and
+> `server/scripts/crypto-test.sh` (fresh test DB, absolute
+> `DATABASE_URL`) and run both.
+
+**Touches:** `server/src/routes/payments.ts`, `server/src/services/crypto.ts`, `apps/android/app/src/main/java/com/jarvis/assistant/MainActivity.kt`, `docs/API.md`, `docs/ARCHITECTURE.md`, `README.md`, `server/scripts/payments-test.sh`, `server/scripts/crypto-test.sh`
+**Done when:** USDT / USDC / DOGE methods create (201) with plausible handles, bad handles 400, secret-looking handles still 400, and a USDT invoice completes checkout → reference stays PENDING → Don manual confirm → PAID with proofHash.
+
+---
+
+## After all 11
 
 Run `docker compose up --build`, repeat Prompt 9's end-to-end flow, then
 ask Don for the first real portal name + its payment methods before

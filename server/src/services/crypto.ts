@@ -1,4 +1,4 @@
-// Crypto payments — BTC / LTC / XMR / ETH.
+// Crypto payments — BTC / LTC / XMR / ETH / USDT / USDC / DOGE.
 //
 // RULE: never mark an invoice PAID on QR/barcode scan alone, and never on
 // a customer-submitted txHash alone. Confirmation must come from a
@@ -10,7 +10,7 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type CryptoCurrency = "BTC" | "LTC" | "XMR" | "ETH";
+export type CryptoCurrency = "BTC" | "LTC" | "XMR" | "ETH" | "USDT" | "USDC" | "DOGE";
 
 export interface CryptoQuote {
   currency: CryptoCurrency;
@@ -48,7 +48,8 @@ export interface CryptoPaymentService {
 export class SimulatedCryptoService implements CryptoPaymentService {
   // Fixed dev conversion rates — clearly fake, for UI testing only.
   // Real rates must come from the provider / an exchange API (Prompt 7).
-  private static RATES: Record<CryptoCurrency, number> = { BTC: 60000, LTC: 80, XMR: 150, ETH: 3000 };
+  // USDT / USDC are pegged to 1 USD; DOGE 0.2 is a made-up dev rate.
+  private static RATES: Record<CryptoCurrency, number> = { BTC: 60000, LTC: 80, XMR: 150, ETH: 3000, USDT: 1, USDC: 1, DOGE: 0.2 };
 
   async quote(opts: { currency: CryptoCurrency; address: string; fiatAmount: string; fiatCurrency: string }): Promise<CryptoQuote> {
     const rate = SimulatedCryptoService.RATES[opts.currency];
@@ -138,7 +139,7 @@ export function cryptoMode(): "simulated" | "provider" {
 }
 
 export function isCryptoType(type: string): type is CryptoCurrency {
-  return type === "BTC" || type === "LTC" || type === "XMR" || type === "ETH";
+  return type === "BTC" || type === "LTC" || type === "XMR" || type === "ETH" || type === "USDT" || type === "USDC" || type === "DOGE";
 }
 
 // --- Customer-submitted reference validation ---

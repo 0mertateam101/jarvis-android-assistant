@@ -202,7 +202,7 @@ fun PortalDetail(
         }
         Spacer(Modifier.height(8.dp))
         Text("Payment methods", fontWeight = FontWeight.Bold)
-        Text("Add a method — type e.g. CASH_APP, VENMO, CHIME, ZELLE, BTC, LTC, XMR, ETH, PAYPAL, CARD, BANK.")
+        Text("Add a method — type e.g. CASH_APP, VENMO, CHIME, ZELLE, BTC, LTC, XMR, ETH, USDT, USDC, DOGE, PAYPAL, CARD, BANK.")
         OutlinedTextField(value = methodType, onValueChange = { methodType = it }, label = { Text("Type, e.g. CASH_APP") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = methodLabel, onValueChange = { methodLabel = it }, label = { Text("Label, e.g. Cash App — APF") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = methodHandle, onValueChange = { methodHandle = it }, label = { Text("Public handle or address — never a private key") }, modifier = Modifier.fillMaxWidth())

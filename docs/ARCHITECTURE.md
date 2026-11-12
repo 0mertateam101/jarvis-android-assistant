@@ -129,7 +129,7 @@ soft off-switch (re-invite creates a fresh grant + fresh code).
 ```
 PaymentMethod {
   id, type: CASH_APP | VENMO | ZELLE | CHIME | PAYPAL | CARD | BANK
-          | BTC | LTC | XMR | ETH,
+          | BTC | LTC | XMR | ETH | USDT | USDC | DOGE,
   label, handle (public handle / URL / address — NEVER a secret),
   details? (JSON: e.g. { "note": "All Pockets Full Consulting" }),
   ownerId -> User, createdAt
@@ -267,7 +267,7 @@ pattern for anything credential-like.
    receipt email sent (or simulated), PDF available at
    `GET /api/invoices/:id/pdf`.
 
-### Crypto (BTC / LTC / XMR / ETH)
+### Crypto (BTC / LTC / XMR / ETH / USDT / USDC / DOGE)
 
 Same invoice flow, with `CryptoPaymentService` (`services/crypto.ts`):
 

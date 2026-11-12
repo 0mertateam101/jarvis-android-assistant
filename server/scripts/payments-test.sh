@@ -46,6 +46,9 @@ ADMIN_EMAIL="prompt5-admin@test.local"
 ADMIN_PASS="TestAdmin123!"
 CUST_EMAIL="prompt5-customer@test.local"
 XMR_ADDR="4$(printf 'A%.0s' $(seq 1 94))" # 95-char test-shaped XMR address
+USDT_ADDR="0x742d35Cc6634C0532925a3b844Bc454e4438f44e" # 0x + 40 hex (ERC-20 style)
+USDC_ADDR="TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" # T + 33 base58 (Tron style)
+DOGE_ADDR="DH5yaieqoZN36fDVciNyRueRG4G6y3oEya" # D + 33 base58
 
 echo "== Prompt 5 payment-method checks against $BASE =="
 
@@ -112,27 +115,46 @@ M7=$(jget /tmp/p5-m7.json "d.data.method.id")
 code=$(create_method /tmp/p5-m8.json ETH "ETH P5" "0x742d35Cc6634C0532925a3b844Bc454e4438f44e")
 check "3. create ETH -> 201" 201 "$code"
 M8=$(jget /tmp/p5-m8.json "d.data.method.id")
+code=$(create_method /tmp/p5-m9.json USDT "USDT P5" "$USDT_ADDR")
+check "3. create USDT (0x address) -> 201" 201 "$code"
+M9=$(jget /tmp/p5-m9.json "d.data.method.id")
+code=$(create_method /tmp/p5-m10.json USDC "USDC P5" "$USDC_ADDR")
+check "3. create USDC (Tron T-address) -> 201" 201 "$code"
+M10=$(jget /tmp/p5-m10.json "d.data.method.id")
+code=$(create_method /tmp/p5-m11.json DOGE "DOGE P5" "$DOGE_ADDR")
+check "3. create DOGE (D-address) -> 201" 201 "$code"
+M11=$(jget /tmp/p5-m11.json "d.data.method.id")
 
 # 4. Invalid type / secret handle / wrong format -> 400 each
-code=$(create_method /tmp/p5-badtype.json DOGE "Doge P5" "D12345")
-check "4. invalid type DOGE -> 400" 400 "$code"
+code=$(create_method /tmp/p5-badtype.json SHIB "Shib P5" "0x12345")
+check "4. invalid type SHIB -> 400" 400 "$code"
 code=$(create_method /tmp/p5-secret.json CASH_APP "Secret P5" "my private key is abc123")
 check "4. private-key-looking handle -> 400" 400 "$code"
 code=$(create_method /tmp/p5-hex.json ETH "Hex P5" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 check "4. raw 64-hex handle -> 400" 400 "$code"
+code=$(create_method /tmp/p5-hexusdt.json USDT "Hex USDT P5" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+check "4. raw 64-hex USDT handle -> 400" 400 "$code"
 code=$(create_method /tmp/p5-nope.json CASH_APP "No Dollar P5" "p5cash")
 check "4. CASH_APP without \$ -> 400" 400 "$code"
 code=$(create_method /tmp/p5-noat.json VENMO "No At P5" "p5venmo")
 check "4. VENMO without @ -> 400" 400 "$code"
 code=$(create_method /tmp/p5-badeth.json ETH "Bad ETH P5" "0x1234")
 check "4. short ETH address -> 400" 400 "$code"
+code=$(create_method /tmp/p5-badusdt.json USDT "Bad USDT P5" "0x1234")
+check "4. short USDT address -> 400" 400 "$code"
+code=$(create_method /tmp/p5-badusdc.json USDC "Bad USDC P5" "not-an-address")
+check "4. bad USDC address -> 400" 400 "$code"
+code=$(create_method /tmp/p5-baddoge.json DOGE "Bad DOGE P5" "Xh5yaieqoZN36fDVciNyRueRG4G6y3oEya")
+check "4. DOGE with wrong prefix -> 400" 400 "$code"
+code=$(create_method /tmp/p5-shortdoge.json DOGE "Short DOGE P5" "D123")
+check "4. short DOGE address -> 400" 400 "$code"
 
-# 5. List methods -> 200, all 8 created ones present
+# 5. List methods -> 200, all 11 created ones present
 code=$(curl -s -o /tmp/p5-list.json -w "%{http_code}" "$BASE/api/payment-methods" \
   -H "Authorization: Bearer $ADMIN_TOKEN")
 check "5. list methods -> 200" 200 "$code"
 N=$(mcount /tmp/p5-list.json)
-[ "$N" = "8" ] && echo "PASS: 5. list has 8 methods" || { echo "FAIL: 5. list has $N methods, expected 8"; FAIL=$((FAIL+1)); }
+[ "$N" = "11" ] && echo "PASS: 5. list has 11 methods" || { echo "FAIL: 5. list has $N methods, expected 11"; FAIL=$((FAIL+1)); }
 
 # 6. Get one method -> 200; unknown id -> 404
 code=$(curl -s -o /tmp/p5-get1.json -w "%{http_code}" "$BASE/api/payment-methods/$M1" \
@@ -142,7 +164,7 @@ code=$(curl -s -o /tmp/p5-getx.json -w "%{http_code}" "$BASE/api/payment-methods
   -H "Authorization: Bearer $ADMIN_TOKEN")
 check "6. get unknown method -> 404" 404 "$code"
 
-# 7. Assign M1+M2 to portal A, M2+M3 to portal B
+# 7. Assign M1+M2+M9 to portal A, M2+M3 to portal B
 assign() { # assign <portal-id-or-slug> <method-id>
   curl -s -o /tmp/p5-assign.json -w "%{http_code}" -X POST "$BASE/api/portals/$1/methods" \
     -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
@@ -150,16 +172,17 @@ assign() { # assign <portal-id-or-slug> <method-id>
 }
 code=$(assign "$PORTAL_A" "$M1"); check "7. assign M1 to portal A -> 201" 201 "$code"
 code=$(assign "$PORTAL_A" "$M2"); check "7. assign M2 to portal A -> 201" 201 "$code"
+code=$(assign "$PORTAL_A" "$M9"); check "7. assign M9 (USDT) to portal A -> 201" 201 "$code"
 code=$(assign "$PORTAL_B" "$M2"); check "7. assign M2 to portal B -> 201" 201 "$code"
 code=$(assign "$PORTAL_B" "$M3"); check "7. assign M3 to portal B -> 201" 201 "$code"
 
-# 8. Pay-page listings: A shows ONLY M1+M2, B shows ONLY M2+M3
+# 8. Pay-page listings: A shows ONLY M1+M2+M9, B shows ONLY M2+M3
 code=$(curl -s -o /tmp/p5-pub-a.json -w "%{http_code}" "$BASE/api/portals/$SLUG_A/public-methods")
 check "8. public-methods portal A -> 200" 200 "$code"
 N=$(mcount /tmp/p5-pub-a.json)
-[ "$N" = "2" ] && echo "PASS: 8. portal A shows 2 methods" || { echo "FAIL: 8. portal A shows $N methods, expected 2"; FAIL=$((FAIL+1)); }
-has_id /tmp/p5-pub-a.json "$M1" && has_id /tmp/p5-pub-a.json "$M2" && ! has_id /tmp/p5-pub-a.json "$M3" \
-  && echo "PASS: 8. portal A shows exactly M1+M2" || { echo "FAIL: 8. portal A method set wrong"; FAIL=$((FAIL+1)); }
+[ "$N" = "3" ] && echo "PASS: 8. portal A shows 3 methods" || { echo "FAIL: 8. portal A shows $N methods, expected 3"; FAIL=$((FAIL+1)); }
+has_id /tmp/p5-pub-a.json "$M1" && has_id /tmp/p5-pub-a.json "$M2" && has_id /tmp/p5-pub-a.json "$M9" && ! has_id /tmp/p5-pub-a.json "$M3" \
+  && echo "PASS: 8. portal A shows exactly M1+M2+M9 (incl. USDT)" || { echo "FAIL: 8. portal A method set wrong"; FAIL=$((FAIL+1)); }
 code=$(curl -s -o /tmp/p5-pub-b.json -w "%{http_code}" "$BASE/api/portals/$SLUG_B/public-methods")
 check "8. public-methods portal B -> 200" 200 "$code"
 N=$(mcount /tmp/p5-pub-b.json)
@@ -167,21 +190,21 @@ N=$(mcount /tmp/p5-pub-b.json)
 has_id /tmp/p5-pub-b.json "$M2" && has_id /tmp/p5-pub-b.json "$M3" && ! has_id /tmp/p5-pub-b.json "$M1" \
   && echo "PASS: 8. portal B shows exactly M2+M3" || { echo "FAIL: 8. portal B method set wrong"; FAIL=$((FAIL+1)); }
 
-# 9. Assign M1 to A again -> 201, no duplicate (A still shows 2)
+# 9. Assign M1 to A again -> 201, no duplicate (A still shows 3)
 code=$(assign "$PORTAL_A" "$M1"); check "9. assign M1 to portal A again -> 201" 201 "$code"
 code=$(curl -s -o /tmp/p5-pub-a2.json -w "%{http_code}" "$BASE/api/portals/$SLUG_A/public-methods")
 N=$(mcount /tmp/p5-pub-a2.json)
-[ "$N" = "2" ] && echo "PASS: 9. portal A still shows 2 methods (no duplicate)" || { echo "FAIL: 9. portal A shows $N methods after re-assign"; FAIL=$((FAIL+1)); }
+[ "$N" = "3" ] && echo "PASS: 9. portal A still shows 3 methods (no duplicate)" || { echo "FAIL: 9. portal A shows $N methods after re-assign"; FAIL=$((FAIL+1)); }
 
-# 10. Unassign M2 from A -> 200; A now shows only M1
+# 10. Unassign M2 from A -> 200; A now shows only M1+M9
 code=$(curl -s -o /tmp/p5-unassign.json -w "%{http_code}" -X DELETE "$BASE/api/portals/$PORTAL_A/methods/$M2" \
   -H "Authorization: Bearer $ADMIN_TOKEN")
 check "10. unassign M2 from portal A -> 200" 200 "$code"
 code=$(curl -s -o /tmp/p5-pub-a3.json -w "%{http_code}" "$BASE/api/portals/$SLUG_A/public-methods")
 N=$(mcount /tmp/p5-pub-a3.json)
-[ "$N" = "1" ] && echo "PASS: 10. portal A now shows 1 method" || { echo "FAIL: 10. portal A shows $N methods after unassign"; FAIL=$((FAIL+1)); }
-has_id /tmp/p5-pub-a3.json "$M1" && ! has_id /tmp/p5-pub-a3.json "$M2" \
-  && echo "PASS: 10. portal A shows only M1" || { echo "FAIL: 10. portal A method set wrong after unassign"; FAIL=$((FAIL+1)); }
+[ "$N" = "2" ] && echo "PASS: 10. portal A now shows 2 methods" || { echo "FAIL: 10. portal A shows $N methods after unassign"; FAIL=$((FAIL+1)); }
+has_id /tmp/p5-pub-a3.json "$M1" && has_id /tmp/p5-pub-a3.json "$M9" && ! has_id /tmp/p5-pub-a3.json "$M2" \
+  && echo "PASS: 10. portal A shows only M1+M9" || { echo "FAIL: 10. portal A method set wrong after unassign"; FAIL=$((FAIL+1)); }
 
 # 11. Assign/unassign with unknown portal or method -> 404
 code=$(assign "no-such-portal" "$M1"); check "11. assign to unknown portal -> 404" 404 "$code"
@@ -227,7 +250,7 @@ check "13. delete method M3 -> 200" 200 "$code"
 code=$(curl -s -o /tmp/p5-list2.json -w "%{http_code}" "$BASE/api/payment-methods" \
   -H "Authorization: Bearer $ADMIN_TOKEN")
 N=$(mcount /tmp/p5-list2.json)
-[ "$N" = "7" ] && echo "PASS: 13. list now has 7 methods" || { echo "FAIL: 13. list has $N methods, expected 7"; FAIL=$((FAIL+1)); }
+[ "$N" = "10" ] && echo "PASS: 13. list now has 10 methods" || { echo "FAIL: 13. list has $N methods, expected 10"; FAIL=$((FAIL+1)); }
 code=$(curl -s -o /tmp/p5-pub-b2.json -w "%{http_code}" "$BASE/api/portals/$SLUG_B/public-methods")
 N=$(mcount /tmp/p5-pub-b2.json)
 [ "$N" = "1" ] && echo "PASS: 13. portal B now shows 1 method" || { echo "FAIL: 13. portal B shows $N methods after delete"; FAIL=$((FAIL+1)); }

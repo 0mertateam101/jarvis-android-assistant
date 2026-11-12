@@ -21,7 +21,7 @@ configured (see **Simulated vs Real** below).
 | 3 | Don controls who gets in | `AccessGrant` — one grant per (portal, email) |
 | 4 | Enter an email → activate it, generate a code. Email = username, code = password | `POST /api/access/invite` — `server/src/routes/access.ts`, `server/src/utils/codes.ts` |
 | 5 | Payment option generates a payment barcode (QR + Code128) sent to the customer's email | `POST /api/invoices` → `barcode.ts` + `email.ts` |
-| 6 | Crypto payment on the website | `server/src/services/crypto.ts` — BTC / LTC / XMR / ETH |
+| 6 | Crypto payment on the website | `server/src/services/crypto.ts` — BTC / LTC / XMR / ETH / USDT / USDC / DOGE |
 | 7 | Add many payment methods, assign them to many portals | `PaymentMethod` + `PortalPaymentMethod` |
 | 8 | Reverse lookup on **all** IP traffic with no access; report filed in that portal's folder | `POST /api/security/visit` + `server/src/services/ipLookup.ts` |
 | 9 | Block / terminate users for policy violation | `AccessGrant.status = TERMINATED` + `BlockedUser` |
@@ -152,8 +152,10 @@ anywhere in this repo.
 - Cash App: `$MsCarterb`
 - Chime: `$apfmoneygoat`
 - Venmo: `@Plummer2002`
-- Crypto: BTC / LTC / XMR addresses are configured per portal in the app
-  (enter the public address only — never a private key).
+- Crypto: BTC / LTC / XMR / ETH / USDT / USDC / DOGE addresses are configured per portal in the app
+  (enter the public address only — never a private key). USDT / USDC accept
+  an ERC-20 style `0x` address or a Tron style `T` address; DOGE uses a
+  `D` (or P2SH `A`) address.
 
 ## Simulated vs Real — read this before you demo or go live
 

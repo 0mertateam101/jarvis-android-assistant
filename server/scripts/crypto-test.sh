@@ -59,6 +59,8 @@ CUSTA_EMAIL="prompt7-customer-a@test.local"
 CUSTB_EMAIL="prompt7-customer-b@test.local"
 BTC_ADDR="bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
 ETH_ADDR="0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+USDT_ADDR="0x742d35Cc6634C0532925a3b844Bc454e4438f44e" # 0x + 40 hex (ERC-20 style)
+DOGE_ADDR="DH5yaieqoZN36fDVciNyRueRG4G6y3oEya" # D + 33 base58
 TXHASH=$(printf 'ab%.0s' $(seq 1 32)) # 64 hex chars
 WEBHOOK_SECRET="stub-webhook-secret"
 
@@ -104,7 +106,7 @@ code=$(curl -s -o /tmp/p7-portal-b.json -w "%{http_code}" -X POST "$BASE/api/por
 check "2. create portal B -> 201" 201 "$code"
 PORTAL_B_ID=$(jget /tmp/p7-portal-b.json "d.data.portal.id")
 
-# 3. BTC + ETH + CASH_APP methods, all assigned to portal A
+# 3. BTC + ETH + USDT + DOGE + CASH_APP methods, all assigned to portal A
 code=$(curl -s -o /tmp/p7-btc.json -w "%{http_code}" -X POST "$BASE/api/payment-methods" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"type\":\"BTC\",\"label\":\"Bitcoin — Test\",\"handle\":\"$BTC_ADDR\"}")
@@ -126,6 +128,28 @@ code=$(curl -s -o /tmp/p7-assign-eth.json -w "%{http_code}" -X POST "$BASE/api/p
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"paymentMethodId\":\"$ETH_ID\"}")
 check "3. assign ETH to portal A -> 201" 201 "$code"
+
+code=$(curl -s -o /tmp/p7-usdt.json -w "%{http_code}" -X POST "$BASE/api/payment-methods" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"type\":\"USDT\",\"label\":\"Tether — Test\",\"handle\":\"$USDT_ADDR\"}")
+check "3. create USDT method -> 201" 201 "$code"
+USDT_ID=$(jget /tmp/p7-usdt.json "d.data.method.id")
+
+code=$(curl -s -o /tmp/p7-assign-usdt.json -w "%{http_code}" -X POST "$BASE/api/portals/$PORTAL_A_ID/methods" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"paymentMethodId\":\"$USDT_ID\"}")
+check "3. assign USDT to portal A -> 201" 201 "$code"
+
+code=$(curl -s -o /tmp/p7-doge.json -w "%{http_code}" -X POST "$BASE/api/payment-methods" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"type\":\"DOGE\",\"label\":\"Dogecoin — Test\",\"handle\":\"$DOGE_ADDR\"}")
+check "3. create DOGE method -> 201" 201 "$code"
+DOGE_ID=$(jget /tmp/p7-doge.json "d.data.method.id")
+
+code=$(curl -s -o /tmp/p7-assign-doge.json -w "%{http_code}" -X POST "$BASE/api/portals/$PORTAL_A_ID/methods" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"paymentMethodId\":\"$DOGE_ID\"}")
+check "3. assign DOGE to portal A -> 201" 201 "$code"
 
 code=$(curl -s -o /tmp/p7-cash.json -w "%{http_code}" -X POST "$BASE/api/payment-methods" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
@@ -397,6 +421,53 @@ else
   TX3_STATUS=$(jget /tmp/p7-tx3.json "d.data.invoice.status")
   [ "$TX3_STATUS" = "PENDING" ] && echo "PASS: 13. invoice 3 still PENDING after txHash submit" || { echo "FAIL: 13. invoice 3 status is '$TX3_STATUS'"; FAIL=$((FAIL+1)); }
 
+  # 13b. USDT end-to-end (Prompt 11): checkout → txHash stays PENDING → Don manual confirm → PAID + proofHash
+  code=$(curl -s -o /tmp/p7-inv4.json -w "%{http_code}" -X POST "$BASE/api/invoices" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"portalSlug\":\"p7-portal-a\",\"payerEmail\":\"$CUSTA_EMAIL\",\"amount\":\"150.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"USDT coaching\",\"amount\":\"150.00\"}],\"paymentMethodId\":\"$USDT_ID\"}")
+  check "13b. create USDT invoice -> 201" 201 "$code"
+  NUM4=$(jget /tmp/p7-inv4.json "d.data.invoice.number")
+  [ "$NUM4" = "JAR-1004" ] && echo "PASS: 13b. USDT invoice number is JAR-1004" || { echo "FAIL: 13b. USDT invoice number is '$NUM4'"; FAIL=$((FAIL+1)); }
+  ADDR4=$(jget /tmp/p7-inv4.json "d.data.crypto.address")
+  [ "$ADDR4" = "$USDT_ADDR" ] && echo "PASS: 13b. checkout shows the portal's USDT address" || { echo "FAIL: 13b. checkout address is '$ADDR4'"; FAIL=$((FAIL+1)); }
+  AMT4=$(jget /tmp/p7-inv4.json "d.data.crypto.amount")
+  [ "$AMT4" = "150.00000000" ] && echo "PASS: 13b. checkout shows exact crypto amount 150.00000000 USDT (dev rate 1)" || { echo "FAIL: 13b. checkout amount is '$AMT4'"; FAIL=$((FAIL+1)); }
+  REF4=$(jget /tmp/p7-inv4.json "d.data.crypto.reference")
+  [ "$REF4" = "JAR-1004" ] && echo "PASS: 13b. checkout reference is JAR-1004" || { echo "FAIL: 13b. checkout reference is '$REF4'"; FAIL=$((FAIL+1)); }
+  INV4_ID=$(jget /tmp/p7-inv4.json "d.data.invoice.id")
+  code=$(curl -s -o /tmp/p7-tx4.json -w "%{http_code}" -X POST "$BASE/api/payments/$INV4_ID/confirm" \
+    -H "Authorization: Bearer $CUSTA_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"reference\":\"$TXHASH\"}")
+  check "13b. customer submits txHash for USDT invoice -> 200" 200 "$code"
+  TX4_STATUS=$(jget /tmp/p7-tx4.json "d.data.invoice.status")
+  [ "$TX4_STATUS" = "PENDING" ] && echo "PASS: 13b. USDT invoice still PENDING after txHash submit (txHash alone never pays)" || { echo "FAIL: 13b. USDT invoice status is '$TX4_STATUS'"; FAIL=$((FAIL+1)); }
+  code=$(curl -s -o /tmp/p7-manual4.json -w "%{http_code}" -X POST "$BASE/api/payments/$INV4_ID/confirm" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"reference\":\"$TXHASH\",\"adminConfirm\":true}")
+  check "13b. ADMIN manual confirm USDT (simulated) -> 200" 200 "$code"
+  MAN4_STATUS=$(jget /tmp/p7-manual4.json "d.data.invoice.status")
+  [ "$MAN4_STATUS" = "PAID" ] && echo "PASS: 13b. USDT invoice PAID by Don's manual confirm" || { echo "FAIL: 13b. USDT invoice status is '$MAN4_STATUS'"; FAIL=$((FAIL+1)); }
+  MAN4_SIM=$(jget /tmp/p7-manual4.json "d.data.payment.simulated")
+  [ "$MAN4_SIM" = "true" ] && echo "PASS: 13b. USDT manual confirmation is labelled SIMULATED" || { echo "FAIL: 13b. USDT payment simulated flag is '$MAN4_SIM'"; FAIL=$((FAIL+1)); }
+  MAN4_PROOF=$(jget /tmp/p7-manual4.json "d.data.invoice.proofHash")
+  [ -n "$MAN4_PROOF" ] && [ "$MAN4_PROOF" != "null" ] && echo "PASS: 13b. PAID USDT invoice has a proofHash" || { echo "FAIL: 13b. USDT proofHash missing"; FAIL=$((FAIL+1)); }
+
+  # 13c. DOGE checkout (Prompt 11): quote shows the D-address + amount at the fake 0.2 dev rate
+  code=$(curl -s -o /tmp/p7-inv5.json -w "%{http_code}" -X POST "$BASE/api/invoices" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"portalSlug\":\"p7-portal-a\",\"payerEmail\":\"$CUSTA_EMAIL\",\"amount\":\"150.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"DOGE coaching\",\"amount\":\"150.00\"}],\"paymentMethodId\":\"$DOGE_ID\"}")
+  check "13c. create DOGE invoice -> 201" 201 "$code"
+  NUM5=$(jget /tmp/p7-inv5.json "d.data.invoice.number")
+  [ "$NUM5" = "JAR-1005" ] && echo "PASS: 13c. DOGE invoice number is JAR-1005" || { echo "FAIL: 13c. DOGE invoice number is '$NUM5'"; FAIL=$((FAIL+1)); }
+  ADDR5=$(jget /tmp/p7-inv5.json "d.data.crypto.address")
+  [ "$ADDR5" = "$DOGE_ADDR" ] && echo "PASS: 13c. checkout shows the portal's DOGE address" || { echo "FAIL: 13c. checkout address is '$ADDR5'"; FAIL=$((FAIL+1)); }
+  AMT5=$(jget /tmp/p7-inv5.json "d.data.crypto.amount")
+  [ "$AMT5" = "750.00000000" ] && echo "PASS: 13c. checkout shows exact crypto amount 750.00000000 DOGE (dev rate 0.2)" || { echo "FAIL: 13c. checkout amount is '$AMT5'"; FAIL=$((FAIL+1)); }
+  REF5=$(jget /tmp/p7-inv5.json "d.data.crypto.reference")
+  [ "$REF5" = "JAR-1005" ] && echo "PASS: 13c. checkout reference is JAR-1005" || { echo "FAIL: 13c. checkout reference is '$REF5'"; FAIL=$((FAIL+1)); }
+  STATUS5=$(jget /tmp/p7-inv5.json "d.data.invoice.status")
+  [ "$STATUS5" = "PENDING" ] && echo "PASS: 13c. DOGE invoice is PENDING (not paid on creation)" || { echo "FAIL: 13c. DOGE invoice status is '$STATUS5'"; FAIL=$((FAIL+1)); }
+
   # 14. DB check: JAR-1001 PAID with a SIMULATED CONFIRMED payment; JAR-1003 has NO CONFIRMED payment
   DB_JSON=$(DATABASE_URL="file:$DB_FILE" node -e "
     const { PrismaClient } = require('@prisma/client');
@@ -446,6 +517,12 @@ if [ -f "$LOG_FILE" ]; then
   if grep -a -q "JAR-1001 paid" "$LOG_FILE"; then
     echo "PASS: 15. server log shows the receipt email for JAR-1001"
   else echo "FAIL: 15. no receipt email for JAR-1001 in server log ($LOG_FILE)"; FAIL=$((FAIL+1)); fi
+  # JAR-1004 (USDT, Prompt 11) is only paid in the simulated branch — skip in provider mode.
+  if [ "$PROVIDER_MODE" != "1" ]; then
+    if grep -a -q "JAR-1004 paid" "$LOG_FILE"; then
+      echo "PASS: 15. server log shows the receipt email for JAR-1004 (USDT)"
+    else echo "FAIL: 15. no receipt email for JAR-1004 in server log ($LOG_FILE)"; FAIL=$((FAIL+1)); fi
+  fi
 else echo "FAIL: 15. server log not found at $LOG_FILE — start the server with output there"; FAIL=$((FAIL+1)); fi
 
 echo "== Summary: $FAIL failure(s) =="
