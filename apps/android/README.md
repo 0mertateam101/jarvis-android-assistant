@@ -72,6 +72,31 @@ run until the jar is in place.
 Prompt 10 was finished and its command flow verified against the live
 dev server (`server/scripts/android-commands-test.sh`, 50 checks), but
 **no Gradle build was run in this environment** — there is no JDK,
-Android SDK, or Android Studio here. The first real build must be the
-Android Studio sync + Run above; if it fails on a version, update the
-table above with what you pinned and why.
+Android SDK, or Android Studio here. The first real build is the
+**GitHub Actions workflow** `.github/workflows/apk-build.yml` (Issue
+#13): it runs on every push to `apps/android/**` (and on demand from
+the Actions tab), sets up JDK 17 + the Android SDK, fetches the
+official Gradle 8.7 wrapper jar with its SHA-256 verified, and runs
+`./gradlew assembleDebug`.
+
+### Download the debug APK (no computer needed)
+
+1. Open the repo on GitHub → **Actions** tab → **Android APK build
+   (debug)** → pick the latest green run.
+2. Scroll to **Artifacts** at the bottom of the run page and download
+   **jarvis-debug-apk** (a zip containing `app-debug.apk`).
+3. On your phone, unzip it and open the APK to install. Android will
+   ask to allow installs from that source — this is a debug build
+   signed with the default debug key, not a Play Store release.
+
+**Artifact expiry:** the APK artifact is kept for **30 days** after the
+run (`retention-days: 30` in the workflow). After that it disappears
+from the run page — re-run the workflow (Actions tab → Run workflow)
+to build a fresh one. If you need an APK kept longer, download it
+before the 30 days are up.
+
+Android Studio is still the way to run the app from source and
+debug it: open `apps/android/` in **Android Studio Hedgehog or
+newer** with JDK 17 and let Gradle sync; then **Run** on a device or
+emulator. If a build fails on a version, update the table above with
+what you pinned and why.
