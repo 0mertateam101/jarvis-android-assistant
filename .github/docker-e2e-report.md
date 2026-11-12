@@ -1,10 +1,11 @@
 # Docker end-to-end check — report
 
-Run: https://github.com/0mertateam101/jarvis-android-assistant/actions/runs/43239457460
-Commit: 63ccf4412acc15ad94cf841f4aa1872350674f5a
-Date (UTC): 2026-11-12T14:40:53Z
+Run: https://github.com/0mertateam101/jarvis-android-assistant/actions/runs/43263868458
+Commit: 72edc55f882ea561b137856e697ec5198db01e1c
+Date (UTC): 2026-11-12T16:57:19Z
 
 **Result: PASS — all Docker e2e checks passed.**
+**Playwright portal click test: FAIL — exit code 1. See the run log.**
 
 ```
 PASS: 0. GET /health (HTTP 200)
@@ -46,7 +47,7 @@ PASS: 16. customer A reads receipt (HTTP 200)
 PASS: 16. receipt shows JAR-1001 PAID with proofHash
 PASS: 17. customer A downloads PDF -> 200 (HTTP 200)
 PASS: 17. PDF content-type is application/pdf
-PASS: 17. PDF is 1886 bytes
+PASS: 17. PDF is 1884 bytes
 PASS: 17. PDF without token -> 401 (HTTP 401)
 PASS: 17. PDF for other portal's customer -> 403 (HTTP 403)
 PASS: 18. block customer A (HTTP 201)
