@@ -84,9 +84,15 @@ jobs:
             https://github.com/gradle/gradle/raw/v8.7.0/gradle/wrapper/gradle-wrapper.jar
           echo "cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8  gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
 
+      # gradlew is not executable in the repo (the push tooling creates
+      # files as mode 100644 and cannot set the executable bit), so make
+      # it executable here before running it — run #2 failed with
+      # "./gradlew: Permission denied" (exit 126) without this.
       - name: Build debug APK
         working-directory: apps/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
