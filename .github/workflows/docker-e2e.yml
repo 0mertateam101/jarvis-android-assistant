@@ -175,6 +175,10 @@ jobs:
           git config user.email "jarvis-ci@users.noreply.github.com"
           git add .github/docker-e2e-report.md
           git commit -m "Docker e2e report [skip ci]" || echo "nothing to commit"
+          # Main may have moved since this run checked out (e.g. another
+          # workflow's commit) — rebase so the push is not rejected as
+          # non-fast-forward. Run #8's report was lost to exactly that.
+          git pull --rebase || echo "pull/rebase failed"
           git push || echo "push failed (nothing new or no permission)"
 
       - name: Comment result on Issue #10
