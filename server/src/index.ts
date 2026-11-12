@@ -1,3 +1,7 @@
+// Load server/.env first — before any module reads process.env
+// (PORT, JWT_SECRET, DATABASE_URL). dotenv does not override variables
+// already set in the shell.
+import "dotenv/config";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";

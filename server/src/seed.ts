@@ -1,3 +1,5 @@
+// Load server/.env first so ADMIN_SEED_* come from .env, not defaults.
+import "dotenv/config";
 // Dev seed: creates the first ADMIN user and Don's example payment methods.
 // Run: npm run seed   (after `prisma migrate dev`)
 // The example handles below are Don's already-known PUBLIC handles — not

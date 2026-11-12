@@ -3,6 +3,7 @@
     "@prisma/client": "^5.19.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
@@ -12,7 +13,7 @@
     "qrcode": "^1.5.3",
     "zod": "^3.23.8"
   },
-  "description": "JARVIS API server \u2014 portals, access codes, payments, invoices, security",
+  "description": "JARVIS API server — portals, access codes, payments, invoices, security",
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
