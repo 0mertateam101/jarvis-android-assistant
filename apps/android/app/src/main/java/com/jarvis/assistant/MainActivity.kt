@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     private val micPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) startListening() else viewModel.handleCommand("")
+        if (granted) startListening() else viewModel.reportError("Microphone permission is needed for voice commands. You can still type them.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,6 +63,9 @@ class MainActivity : ComponentActivity() {
                 onSelectPortal = { viewModel.selectPortal(it) },
                 onInvite = { email, portal -> viewModel.invite(email, portal) },
                 onBlock = { email, portal -> viewModel.block(email, portal) },
+                onCreateMethod = { type, label, handle -> viewModel.createPaymentMethod(type, label, handle) },
+                onAssignMethod = { method, portal -> viewModel.assignMethod(method, portal) },
+                onUnassignMethod = { method, portal -> viewModel.unassignMethod(method, portal) },
             )
         }
     }
@@ -76,7 +79,7 @@ class MainActivity : ComponentActivity() {
     private fun startListening() {
         voiceInput.listenOnce(
             onResult = { text -> viewModel.handleVoiceTranscript(text) },
-            onError = { /* Surface via a command error: reuse the parser's error path */ },
+            onError = { message -> viewModel.reportError(message) },
         )
     }
 }
@@ -90,6 +93,9 @@ fun JarvisScreen(
     onSelectPortal: (Portal) -> Unit,
     onInvite: (String, Portal) -> Unit,
     onBlock: (String, Portal) -> Unit,
+    onCreateMethod: (String, String, String) -> Unit,
+    onAssignMethod: (PaymentMethod, Portal) -> Unit,
+    onUnassignMethod: (PaymentMethod, Portal) -> Unit,
 ) {
     if (!state.loggedIn) {
         LoginScreen(onLogin = onLogin, error = state.error)
@@ -119,7 +125,18 @@ fun JarvisScreen(
             item {
                 Spacer(Modifier.height(16.dp))
                 Text("Portal: ${portal.name}", fontWeight = FontWeight.Bold)
-                PortalDetail(portal = portal, grants = state.grants, traffic = state.traffic, onInvite = onInvite, onBlock = onBlock)
+                PortalDetail(
+                    portal = portal,
+                    grants = state.grants,
+                    traffic = state.traffic,
+                    methods = state.methods,
+                    assignedMethods = state.assignedMethods,
+                    onInvite = onInvite,
+                    onBlock = onBlock,
+                    onCreateMethod = onCreateMethod,
+                    onAssignMethod = onAssignMethod,
+                    onUnassignMethod = onUnassignMethod,
+                )
             }
         }
     }
@@ -155,11 +172,19 @@ fun PortalDetail(
     portal: Portal,
     grants: List<Grant>,
     traffic: List<TrafficLog>,
+    methods: List<PaymentMethod>,
+    assignedMethods: List<PaymentMethod>,
     onInvite: (String, Portal) -> Unit,
     onBlock: (String, Portal) -> Unit,
+    onCreateMethod: (String, String, String) -> Unit,
+    onAssignMethod: (PaymentMethod, Portal) -> Unit,
+    onUnassignMethod: (PaymentMethod, Portal) -> Unit,
 ) {
     var inviteEmail by remember { mutableStateOf("") }
     var blockEmail by remember { mutableStateOf("") }
+    var methodType by remember { mutableStateOf("") }
+    var methodLabel by remember { mutableStateOf("") }
+    var methodHandle by remember { mutableStateOf("") }
     Column {
         Text("Invite by email")
         Row {
@@ -174,6 +199,27 @@ fun PortalDetail(
         Row {
             OutlinedTextField(value = blockEmail, onValueChange = { blockEmail = it }, label = { Text("email to block") }, modifier = Modifier.weight(1f))
             Button(onClick = { onBlock(blockEmail, portal); blockEmail = "" }) { Text("Block") }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Payment methods", fontWeight = FontWeight.Bold)
+        Text("Add a method — type e.g. CASH_APP, VENMO, CHIME, ZELLE, BTC, LTC, XMR, ETH, PAYPAL, CARD, BANK.")
+        OutlinedTextField(value = methodType, onValueChange = { methodType = it }, label = { Text("Type, e.g. CASH_APP") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = methodLabel, onValueChange = { methodLabel = it }, label = { Text("Label, e.g. Cash App — APF") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = methodHandle, onValueChange = { methodHandle = it }, label = { Text("Public handle or address — never a private key") }, modifier = Modifier.fillMaxWidth())
+        Button(onClick = { onCreateMethod(methodType, methodLabel, methodHandle); methodType = ""; methodLabel = ""; methodHandle = "" }) { Text("Add method") }
+        Spacer(Modifier.height(8.dp))
+        Text("Assign to ${portal.name}")
+        if (methods.isEmpty()) Text("No payment methods yet — add one above.")
+        methods.forEach { method ->
+            val assigned = assignedMethods.any { it.id == method.id }
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${method.type} — ${method.label} (${method.handle})", modifier = Modifier.weight(1f))
+                if (assigned) {
+                    OutlinedButton(onClick = { onUnassignMethod(method, portal) }) { Text("Remove") }
+                } else {
+                    Button(onClick = { onAssignMethod(method, portal) }) { Text("Assign") }
+                }
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text("Unauthorised visits (reverse lookup)")

@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 //   invite <email> to <portal slug>     → generates a code, shown ONCE
 //   block <email> on <portal slug>      → block + terminate (policy)
 //   list portals                        → refresh the portal list
+//   list methods                        → refresh the payment-method list
 //   show traffic <portal slug>          → load the security report
 // Anything else is shown as "I don't know that command yet" — Jarvis
 // never guesses at an API call, and never sends anything without Don's
@@ -25,6 +26,7 @@ data class JarvisUiState(
     val methods: List<PaymentMethod> = emptyList(),
     val grants: List<Grant> = emptyList(),
     val traffic: List<TrafficLog> = emptyList(),
+    val assignedMethods: List<PaymentMethod> = emptyList(),
     val selectedPortal: Portal? = null,
     val lastInvite: InviteResult? = null,
     val message: String = "",
@@ -40,6 +42,9 @@ class JarvisViewModel(private val api: ApiClient = ApiClient()) : ViewModel() {
     private fun update(fn: (JarvisUiState) -> JarvisUiState) { _state.value = fn(_state.value) }
     private fun setMessage(m: String) = update { it.copy(message = m, error = "") }
     private fun setError(e: String) = update { it.copy(error = e, message = "") }
+
+    /** Surface an error from outside the parser (e.g. voice input). */
+    fun reportError(message: String) = setError(message)
 
     fun login(email: String, password: String) {
         update { it.copy(busy = true) }
@@ -67,13 +72,47 @@ class JarvisViewModel(private val api: ApiClient = ApiClient()) : ViewModel() {
     }
 
     fun selectPortal(portal: Portal) {
-        update { it.copy(selectedPortal = portal, grants = emptyList(), traffic = emptyList(), lastInvite = null) }
+        update { it.copy(selectedPortal = portal, grants = emptyList(), traffic = emptyList(), assignedMethods = emptyList(), lastInvite = null) }
         viewModelScope.launch {
             try {
                 val grants = withContext(Dispatchers.IO) { api.listGrants(portal.id) }
                 val traffic = withContext(Dispatchers.IO) { api.listTraffic(portal.id) }
-                update { it.copy(grants = grants, traffic = traffic) }
+                val assigned = withContext(Dispatchers.IO) { api.assignedMethods(portal.id) }
+                update { it.copy(grants = grants, traffic = traffic, assignedMethods = assigned) }
             } catch (e: Exception) { setError(e.message ?: "Could not load portal details.") }
+        }
+    }
+
+    fun createPaymentMethod(type: String, label: String, handle: String) {
+        if (type.isBlank() || handle.isBlank()) { setError("Give the method a type and a handle first."); return }
+        update { it.copy(busy = true) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.createPaymentMethod(type.trim().uppercase(), label.ifBlank { type.trim().uppercase() }, handle.trim()) }
+                update { it.copy(busy = false) }
+                setMessage("Payment method '$label' added.")
+                refresh()
+            } catch (e: Exception) { update { it.copy(busy = false) }; setError(e.message ?: "Could not add payment method.") }
+        }
+    }
+
+    fun assignMethod(method: PaymentMethod, portal: Portal) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.assignMethod(portal.id, method.id) }
+                setMessage("${method.label} assigned to ${portal.name}.")
+                selectPortal(portal)
+            } catch (e: Exception) { setError(e.message ?: "Could not assign method.") }
+        }
+    }
+
+    fun unassignMethod(method: PaymentMethod, portal: Portal) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.unassignMethod(portal.id, method.id) }
+                setMessage("${method.label} removed from ${portal.name}.")
+                selectPortal(portal)
+            } catch (e: Exception) { setError(e.message ?: "Could not remove method.") }
         }
     }
 
@@ -123,6 +162,7 @@ class JarvisViewModel(private val api: ApiClient = ApiClient()) : ViewModel() {
         val trafficMatch = Regex("""^show\s+traffic\s+(\S+)$""", RegexOption.IGNORE_CASE).find(command)
         when {
             command.equals("list portals", ignoreCase = true) -> { refresh(); setMessage("Portals refreshed.") }
+            command.equals("list methods", ignoreCase = true) -> { refresh(); setMessage("Payment methods refreshed.") }
             inviteMatch != null -> {
                 val (email, slug) = inviteMatch.destructured
                 val portal = _state.value.portals.find { it.slug == slug }

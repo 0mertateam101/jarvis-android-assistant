@@ -45,7 +45,14 @@ class ApiClient {
             val text = res.body?.string().orEmpty()
             val json = if (text.isBlank()) JSONObject() else JSONObject(text)
             if (!res.isSuccessful) {
-                val message = json.optJSONObject("error")?.optString("message") ?: "Request failed (${res.code})"
+                // 401/403 always surface the generic denial — never the
+                // server's detail (e.g. "Missing token"), which could leak
+                // why access was denied.
+                val message = when (res.code) {
+                    401 -> "Invalid credentials"
+                    403 -> "Access denied"
+                    else -> json.optJSONObject("error")?.optString("message") ?: "Request failed (${res.code})"
+                }
                 throw ApiException(message)
             }
             return json.optJSONObject("data") ?: json
@@ -108,6 +115,20 @@ class ApiClient {
 
     fun assignMethod(portalId: String, methodId: String) {
         request("/api/portals/$portalId/methods", "POST", JSONObject().put("paymentMethodId", methodId))
+    }
+
+    fun unassignMethod(portalId: String, methodId: String) {
+        request("/api/portals/$portalId/methods/$methodId", "DELETE")
+    }
+
+    /** Methods currently assigned to a portal (GET /api/portals/:id includes them). */
+    fun assignedMethods(portalId: String): List<PaymentMethod> {
+        val data = request("/api/portals/$portalId", "GET")
+        val links = data.getJSONObject("portal").optJSONArray("methods") ?: JSONArray()
+        return (0 until links.length()).mapNotNull { i ->
+            val m = links.getJSONObject(i).optJSONObject("paymentMethod") ?: return@mapNotNull null
+            PaymentMethod(m.getString("id"), m.getString("type"), m.optString("label", m.getString("type")), m.getString("handle"))
+        }
     }
 
     // --- Security: traffic report + block / terminate ---

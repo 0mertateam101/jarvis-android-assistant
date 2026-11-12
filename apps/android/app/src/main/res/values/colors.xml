@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon background — neutral near-black (no Jarvis logo or
+         brand colours supplied yet; keep it plain until Don provides one). -->
+    <color name="ic_launcher_background">#111111</color>
+</resources>
