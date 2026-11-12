@@ -173,13 +173,18 @@ jobs:
         run: |
           git config user.name "jarvis-ci"
           git config user.email "jarvis-ci@users.noreply.github.com"
+          # The report is regenerated whole every run, so a plain rebase
+          # conflicts whenever two runs overlap or main moved (run #10's
+          # report was lost to exactly that). Save the generated report,
+          # reset to the latest main, restore it, then commit + push.
+          # The checkout is a detached HEAD, so push HEAD:main explicitly.
+          cp .github/docker-e2e-report.md /tmp/docker-e2e-report.md || { echo "no report file — nothing to commit"; exit 0; }
+          git fetch origin main
+          git reset --hard origin/main
+          cp /tmp/docker-e2e-report.md .github/docker-e2e-report.md
           git add .github/docker-e2e-report.md
           git commit -m "Docker e2e report [skip ci]" || echo "nothing to commit"
-          # Main may have moved since this run checked out (e.g. another
-          # workflow's commit) — rebase so the push is not rejected as
-          # non-fast-forward. Run #8's report was lost to exactly that.
-          git pull --rebase || echo "pull/rebase failed"
-          git push || echo "push failed (nothing new or no permission)"
+          git push origin HEAD:main || echo "push failed (nothing new or no permission)"
 
       - name: Comment result on Issue #10
         if: always()
