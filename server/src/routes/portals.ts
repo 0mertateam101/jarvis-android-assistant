@@ -33,6 +33,14 @@ function slugify(name: string): string {
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "portal";
 }
 
+// Look a portal up by id OR slug, scoped to the calling admin.
+// The :id param accepts either — unknown ids AND unknown slugs both 404.
+async function findOwnedPortal(ownerId: string, idOrSlug: string) {
+  const byId = await prisma.portal.findFirst({ where: { id: idOrSlug, ownerId } });
+  if (byId) return byId;
+  return prisma.portal.findFirst({ where: { slug: idOrSlug, ownerId } });
+}
+
 portalsRouter.use(authMiddleware, requireAdmin);
 
 portalsRouter.post("/", async (req: AuthedRequest, res) => {
@@ -62,15 +70,17 @@ portalsRouter.get("/", async (req: AuthedRequest, res) => {
 });
 
 portalsRouter.get("/:id", async (req: AuthedRequest, res) => {
-  const portal = await prisma.portal.findFirst({
-    where: { id: req.params.id, ownerId: req.auth!.sub },
-    include: { accounts: true, methods: { include: { paymentMethod: true } } },
-  });
+  const portal = await findOwnedPortal(req.auth!.sub, req.params.id);
   if (!portal) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;
   }
-  res.json({ ok: true, data: { portal } });
+  // Always include linked accounts + assigned payment methods (see docs/API.md).
+  const full = await prisma.portal.findUnique({
+    where: { id: portal.id },
+    include: { accounts: true, methods: { include: { paymentMethod: true } } },
+  });
+  res.json({ ok: true, data: { portal: full } });
 });
 
 portalsRouter.patch("/:id", async (req: AuthedRequest, res) => {
@@ -79,7 +89,7 @@ portalsRouter.patch("/:id", async (req: AuthedRequest, res) => {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });
     return;
   }
-  const portal = await prisma.portal.findFirst({ where: { id: req.params.id, ownerId: req.auth!.sub } });
+  const portal = await findOwnedPortal(req.auth!.sub, req.params.id);
   if (!portal) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;
@@ -90,7 +100,7 @@ portalsRouter.patch("/:id", async (req: AuthedRequest, res) => {
 
 portalsRouter.delete("/:id", async (req: AuthedRequest, res) => {
   // Archive, never hard-delete — invoices and traffic logs must survive.
-  const portal = await prisma.portal.findFirst({ where: { id: req.params.id, ownerId: req.auth!.sub } });
+  const portal = await findOwnedPortal(req.auth!.sub, req.params.id);
   if (!portal) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;

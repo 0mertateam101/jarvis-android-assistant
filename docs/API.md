@@ -56,8 +56,9 @@ Response `201`: the `Portal` object.
 Lists Don's portals. Response: `{ portals: [Portal, …] }`.
 
 ### `GET /api/portals/:id` — ADMIN
-Response: `{ portal: Portal }` (includes linked accounts + assigned
-payment methods when `?include=accounts,methods` is passed).
+`:id` accepts the portal id **or** its slug; an unknown id or slug
+returns `404`. Response: `{ portal: Portal }` (always includes the
+linked accounts and the assigned payment methods).
 
 ### `PATCH /api/portals/:id` — ADMIN
 Body: any of `{ name, description, currency, status }`
@@ -239,13 +240,19 @@ a `TERMINATED` grant; re-invite is required).
 
 ### `POST /api/portals/:portalId/accounts` — ADMIN
 Body: `{ "type": "CASH_APP", "label": "Cash App", "handle": "$MsCarterb", "notes": "APF" }`
-Response `201`: the `LinkedAccount`. Never store secrets here.
+Response `201`: the `LinkedAccount`. Never store secrets here — a
+handle/notes that looks like a private key, seed phrase, mnemonic,
+password, API key, or raw 64-hex key is rejected with `400`.
 
 ### `GET /api/portals/:portalId/accounts` — ADMIN
-Response: `{ accounts: [LinkedAccount, …] }`.
+Response: `{ accounts: [LinkedAccount, …] }` — only that portal's
+accounts. An unknown portal id (or one Don does not own) returns `404`.
 
 ### `DELETE /api/accounts/:id` — ADMIN
-Response `200`: `{ ok: true }`.
+Response `200`: `{ ok: true }`. The account must belong to a portal Don
+owns, otherwise `404`. If `?portalId=` is supplied and the account
+belongs to a different portal, that is also a `404` — deletes never
+cross portals.
 
 ---
 
