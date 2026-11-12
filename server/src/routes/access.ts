@@ -67,9 +67,18 @@ accessRouter.post("/invite", authMiddleware, requireAdmin, async (req: AuthedReq
   });
 });
 
-accessRouter.get("/portals/:portalId/grants", authMiddleware, requireAdmin, async (req, res) => {
+accessRouter.get("/portals/:portalId/grants", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
+  // Scoped read, like portals/accounts (Prompt 3): unknown portal, or one
+  // the admin does not own, is a 404. Accepts portal id or slug.
+  const portal = await prisma.portal.findFirst({
+    where: { ownerId: req.auth!.sub, OR: [{ id: req.params.portalId }, { slug: req.params.portalId }] },
+  });
+  if (!portal) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
+    return;
+  }
   const grants = await prisma.accessGrant.findMany({
-    where: { portalId: req.params.portalId },
+    where: { portalId: portal.id },
     orderBy: { createdAt: "desc" },
     select: { id: true, portalId: true, email: true, status: true, lastUsedAt: true, createdAt: true },
   });
@@ -115,14 +124,19 @@ accessRouter.post("/login", async (req, res) => {
   });
 });
 
-accessRouter.post("/revoke", authMiddleware, requireAdmin, async (req, res) => {
+accessRouter.post("/revoke", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const parsed = revokeSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });
     return;
   }
-  const grant = await prisma.accessGrant.findUnique({ where: { id: parsed.data.grantId } });
-  if (!grant) {
+  // Scoped: a grant on a portal the admin does not own is a 404, never
+  // a cross-portal revoke.
+  const grant = await prisma.accessGrant.findUnique({
+    where: { id: parsed.data.grantId },
+    include: { portal: { select: { ownerId: true } } },
+  });
+  if (!grant || grant.portal.ownerId !== req.auth!.sub) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Grant not found" } });
     return;
   }

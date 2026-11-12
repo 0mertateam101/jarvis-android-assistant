@@ -95,6 +95,8 @@ Body: `{ "portalId": "…", "email": "customer@example.com" }`
 
 ### `GET /api/access/portals/:portalId/grants` — ADMIN
 Lists grants for a portal (emails + status + `lastUsedAt`; **never** codes).
+Scoped to portals the admin owns — unknown portal, or one owned by
+another admin, is `404`. Accepts portal id or slug.
 
 ### `POST /api/access/login` — public (customer)
 Body: `{ "portalSlug": "vip-coaching", "email": "customer@example.com", "code": "7HLM-BN8B-2V9X" }`
@@ -109,9 +111,11 @@ Body: `{ "portalSlug": "vip-coaching", "email": "customer@example.com", "code": 
 
 ### `POST /api/access/revoke` — ADMIN
 Body: `{ "grantId": "…" }` → sets `status: REVOKED`. Response: the grant.
+Scoped to grants on portals the admin owns — a grant on another admin's
+portal is `404`.
 
 ### `GET /api/access/me` — customer JWT
-Returns `{ email, portalId, portalSlug }` for the caller's token.
+Returns `{ email, portalId }` for the caller's token.
 
 ---
 
