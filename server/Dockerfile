@@ -13,7 +13,20 @@
 #     postgres/ folder, so `prisma/postgres/schema.prisma` resolves at
 #     runtime too. /app/node_modules is an anonymous volume, so the
 #     runtime Prisma client is the one generated in the build stage below.
+#   - OpenSSL is REQUIRED in BOTH stages (see the RUN lines below):
+#     Prisma's engine binaries (schema engine + query engine) link
+#     against libssl/libcrypto, and node:20-alpine ships NEITHER. That
+#     is what killed the second GitHub Actions docker run (run
+#     43215195831, 2026-11-12): `migrate deploy` crashed at Prisma
+#     engine startup with "Could not parse schema engine response ...
+#     'Error load'..." plus a warning the libssl/OpenSSL version could
+#     not be detected. Switching to node:20-slim alone does NOT fix
+#     this — slim also ships without libssl — so openssl is installed
+#     explicitly in both stages instead.
 FROM node:20-alpine AS build
+# Prisma `generate` runs the schema engine, which links libssl/libcrypto.
+# node:20-alpine ships neither — install openssl (see header note).
+RUN apk add --no-cache openssl && openssl version
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
@@ -24,6 +37,9 @@ COPY src ./src
 RUN npm run build
 
 FROM node:20-alpine
+# `migrate deploy` (schema engine) and the Prisma query engine both need
+# libssl/libcrypto at RUNTIME — this is the stage that crashed in run #2.
+RUN apk add --no-cache openssl && openssl version
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
