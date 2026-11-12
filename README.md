@@ -96,9 +96,11 @@ invoice payload and the email is queued by the server.
 ### 3. Android control app
 
 Open `apps/android/` in Android Studio (Hedgehog or newer), sync Gradle,
-run on an emulator or a physical device. Set the API base URL in
-`ApiClient.kt` (`BASE_URL`) to your machine's LAN IP
-(e.g. `http://192.168.1.10:4000`) — `10.0.2.2` works from the emulator.
+run on an emulator or a physical device. The API base URL is set in the
+app, on the sign-in screen — type the server address and tap Save server
+(see `apps/android/README.md`). The default is `http://10.0.2.2:4000`,
+which works from the emulator; a physical phone needs your machine's
+LAN IP (e.g. `http://192.168.1.10:4000`) or a deployed `https://` URL.
 
 Voice: the mic button uses Android `SpeechRecognizer` on-device. The
 optional Whisper hook in `VoiceInput.kt` is disabled unless

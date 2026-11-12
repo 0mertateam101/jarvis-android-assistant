@@ -5,7 +5,9 @@ commands — `create portal <name>`, `invite <email> to <portal>`,
 `block <email> on <portal>`, `list portals`, `list methods`,
 `show traffic <portal>` — or use the on-screen buttons for the same actions.
 The generated invite code is shown **once** on screen and is never stored
-on the phone (in-memory state only — no SharedPreferences, no DataStore).
+on the phone — it lives in memory only. The one thing the app does save
+on the phone is the server address (see "Pointing the app at the server"
+below), kept in SharedPreferences.
 
 ## Pinned versions (Prompt 10)
 
@@ -25,12 +27,31 @@ with JDK 17 and let Gradle sync; then **Run** on a device or emulator.
 
 ## Pointing the app at the server
 
-`ApiClient.BASE_URL` is `http://10.0.2.2:4000` — the Android emulator's
-alias for the host machine's `localhost:4000`, where the dev server runs.
-On a physical phone, change it to your machine's LAN IP, e.g.
-`http://192.168.1.10:4000` (same Wi-Fi, server on `0.0.0.0:4000`).
-The manifest allows cleartext HTTP (`usesCleartextTraffic`) for that dev
-address only — production must be HTTPS.
+The server address is a setting in the app — no code change needed.
+On the sign-in screen, under the Sign in button, you will see:
+
+- **Server: `<current address>`** — what the app is pointed at right
+  now, shown every time the app opens.
+- A **server address** field (already filled with the current address)
+  and a **Save server** button — type the new address and tap Save.
+
+The address must start with `http://` or `https://` (a trailing `/` is
+dropped for you), e.g. `https://jarvis.example.com` or
+`http://192.168.1.10:4000`. Anything else is rejected with a message
+and the old address stays in place. The address is saved in
+SharedPreferences on the phone only — it is never written into the
+repo, never logged, and never sent anywhere except as the API base URL.
+The sign-in itself is unchanged: owner email + password → ADMIN login.
+
+The default is `http://10.0.2.2:4000` — the Android emulator's alias
+for the host machine's `localhost:4000`, where the dev server runs.
+That default only works in the emulator. **On a real phone the debug
+APK needs a reachable server URL before it can sign in**: either your
+machine's LAN IP on the same Wi-Fi (e.g. `http://192.168.1.10:4000`,
+server listening on `0.0.0.0:4000`), or a public `https://` URL once
+Jarvis is deployed. `10.0.2.2` goes nowhere on a physical device.
+The manifest allows cleartext HTTP (`usesCleartextTraffic`) for that
+dev address only — production must be HTTPS.
 
 ## Voice
 
@@ -88,6 +109,9 @@ official Gradle 8.7 wrapper jar with its SHA-256 verified, and runs
 3. On your phone, unzip it and open the APK to install. Android will
    ask to allow installs from that source — this is a debug build
    signed with the default debug key, not a Play Store release.
+4. Open the app and set the server address on the sign-in screen (see
+   "Pointing the app at the server" above) — the app cannot sign in
+   until it points at a reachable server.
 
 **Artifact expiry:** the APK artifact is kept for **30 days** after the
 run (`retention-days: 30` in the workflow). After that it disappears

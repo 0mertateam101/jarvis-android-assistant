@@ -54,11 +54,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         voiceInput = VoiceInput(this)
+        // Point the API client at the saved server address (or the
+        // emulator default) before anything signs in (Issue #17).
+        viewModel.loadServerUrl(applicationContext)
         setContent {
             val state by viewModel.state.collectAsState()
             JarvisScreen(
                 state = state,
                 onLogin = { email, password -> viewModel.login(email, password) },
+                onSaveServerUrl = { raw -> viewModel.saveServerUrl(applicationContext, raw) },
                 onCommand = { viewModel.handleCommand(it) },
                 onMic = ::onMicTapped,
                 onSelectPortal = { viewModel.selectPortal(it) },
@@ -90,6 +94,7 @@ class MainActivity : ComponentActivity() {
 fun JarvisScreen(
     state: JarvisUiState,
     onLogin: (String, String) -> Unit,
+    onSaveServerUrl: (String) -> Unit,
     onCommand: (String) -> Unit,
     onMic: () -> Unit,
     onSelectPortal: (Portal) -> Unit,
@@ -101,7 +106,7 @@ fun JarvisScreen(
     onReviewVerification: (IdVerification, Portal, String) -> Unit,
 ) {
     if (!state.loggedIn) {
-        LoginScreen(onLogin = onLogin, error = state.error)
+        LoginScreen(onLogin = onLogin, error = state.error, serverUrl = state.serverUrl, onSaveServerUrl = onSaveServerUrl)
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -148,9 +153,17 @@ fun JarvisScreen(
 }
 
 @Composable
-fun LoginScreen(onLogin: (String, String) -> Unit, error: String) {
+fun LoginScreen(
+    onLogin: (String, String) -> Unit,
+    error: String,
+    serverUrl: String,
+    onSaveServerUrl: (String) -> Unit,
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    // Prefilled with the current address; resets to it whenever a new
+    // address is saved (the normalized value comes back via serverUrl).
+    var serverField by remember(serverUrl) { mutableStateOf(serverUrl) }
     Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
         Text("JARVIS — sign in", fontWeight = FontWeight.Bold)
         OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email") }, modifier = Modifier.fillMaxWidth())
@@ -158,6 +171,13 @@ fun LoginScreen(onLogin: (String, String) -> Unit, error: String) {
         if (error.isNotBlank()) Text(error, color = Color.Red)
         Spacer(Modifier.height(12.dp))
         Button(onClick = { onLogin(email, password) }, modifier = Modifier.fillMaxWidth()) { Text("Sign in") }
+        Spacer(Modifier.height(20.dp))
+        // Server address setting (Issue #17): the sign-in screen always
+        // shows what the app is pointed at, and Don can change it here.
+        Text("Server: $serverUrl")
+        Text("On a real phone this must be a reachable server address — the 10.0.2.2 default only works in the emulator.")
+        OutlinedTextField(value = serverField, onValueChange = { serverField = it }, label = { Text("Server address, e.g. http://192.168.1.10:4000") }, modifier = Modifier.fillMaxWidth())
+        OutlinedButton(onClick = { onSaveServerUrl(serverField) }, modifier = Modifier.fillMaxWidth()) { Text("Save server") }
     }
 }
 

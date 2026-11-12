@@ -8,9 +8,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 // JARVIS API client — talks to the server in docs/API.md.
-// BASE_URL: emulator → 10.0.2.2 ; physical device → your machine's LAN IP.
-// e.g. "http://192.168.1.10:4000". Change it here, or set it from a
-// BuildConfig field (Copilot Prompt 10).
+// Base URL comes from ServerSettings (Issue #17): the address Don saved
+// on the sign-in screen, stored in SharedPreferences on the phone.
+// Default is the emulator's alias for the host's localhost:4000; on a
+// physical phone Don types the server's real address instead.
+// The base URL can change while the app is running (Don saves a new
+// server address), so it is a var, not a const.
 
 data class Portal(val id: String, val slug: String, val name: String, val currency: String, val status: String)
 data class PaymentMethod(val id: String, val type: String, val label: String, val handle: String)
@@ -19,11 +22,7 @@ data class TrafficLog(val ip: String, val country: String?, val city: String?, v
 data class InviteResult(val email: String, val code: String)
 data class IdVerification(val id: String, val email: String, val idType: String, val status: String, val createdAt: String)
 
-class ApiClient {
-    companion object {
-        // TODO (Prompt 10): move to BuildConfig / a settings screen.
-        const val BASE_URL = "http://10.0.2.2:4000"
-    }
+class ApiClient(var baseUrl: String = ServerSettings.DEFAULT_BASE_URL) {
 
     private val client = OkHttpClient()
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
@@ -31,7 +30,7 @@ class ApiClient {
         private set
 
     private fun request(path: String, method: String, body: JSONObject? = null, token: String? = null): JSONObject {
-        val builder = Request.Builder().url("$BASE_URL$path")
+        val builder = Request.Builder().url("$baseUrl$path")
         val auth = token ?: adminToken
         if (auth != null) builder.header("Authorization", "Bearer $auth")
         val requestBody = (body?.toString() ?: "").toRequestBody(jsonMedia)

@@ -1,5 +1,6 @@
 package com.jarvis.assistant
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ import kotlinx.coroutines.withContext
 
 data class JarvisUiState(
     val loggedIn: Boolean = false,
+    val serverUrl: String = ServerSettings.DEFAULT_BASE_URL,
     val portals: List<Portal> = emptyList(),
     val methods: List<PaymentMethod> = emptyList(),
     val grants: List<Grant> = emptyList(),
@@ -46,6 +48,29 @@ class JarvisViewModel(private val api: ApiClient = ApiClient()) : ViewModel() {
 
     /** Surface an error from outside the parser (e.g. voice input). */
     fun reportError(message: String) = setError(message)
+
+    /** Load the saved server address (or the emulator default) and point
+     *  the API client at it. Called once from MainActivity.onCreate. */
+    fun loadServerUrl(context: Context) {
+        val url = ServerSettings.load(context.applicationContext)
+        api.baseUrl = url
+        update { it.copy(serverUrl = url) }
+    }
+
+    /** Validate + save a new server address from the sign-in screen.
+     *  Returns true when it was saved; false leaves the old address in
+     *  place and shows why in the error line. */
+    fun saveServerUrl(context: Context, raw: String): Boolean {
+        val saved = ServerSettings.save(context.applicationContext, raw)
+        if (saved == null) {
+            setError("That is not a valid server address — use http:// or https://, e.g. http://192.168.1.10:4000")
+            return false
+        }
+        api.baseUrl = saved
+        update { it.copy(serverUrl = saved) }
+        setMessage("Server set to $saved. Sign in to connect.")
+        return true
+    }
 
     fun login(email: String, password: String) {
         update { it.copy(busy = true) }
