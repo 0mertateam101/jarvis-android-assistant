@@ -1,0 +1,101 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { confirmPayment, createInvoice, getPublicMethods, getSession, type CryptoDetails, type Invoice, type PublicMethod } from "../api";
+
+// Pay page: pick a method → create invoice → show QR + Code128 barcode
+// (also emailed to the payer by the server) → submit a payment reference
+// → receipt. The invoice is NOT paid by scanning the barcode.
+
+export default function Pay() {
+  const { slug = "" } = useParams();
+  const session = getSession();
+  const navigate = useNavigate();
+  const [methods, setMethods] = useState<PublicMethod[]>([]);
+  const [methodId, setMethodId] = useState("");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [crypto, setCrypto] = useState<CryptoDetails | null>(null);
+  const [reference, setReference] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!session) { navigate("/"); return; }
+    getPublicMethods(slug).then((d) => { setMethods(d.methods); setMethodId(d.methods[0]?.id ?? ""); }).catch(() => setError("Could not load payment methods."));
+  }, [slug, session, navigate]);
+
+  async function create(e: FormEvent) {
+    e.preventDefault(); setError(""); setMessage(""); setBusy(true);
+    try {
+      const data = await createInvoice({
+        portalSlug: slug, payerEmail: session!.email, amount: Number(amount).toFixed(2),
+        currency: "USD", items: [{ description, amount: Number(amount).toFixed(2) }], paymentMethodId: methodId,
+      });
+      setInvoice(data.invoice); setCrypto(data.crypto);
+      setMessage(data.invoice.emailStatus === "SIMULATED"
+        ? "Barcode generated. Email delivery is simulated in this build (no SMTP configured) — the barcode below is your payment barcode."
+        : "Barcode generated and sent to your email.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not create invoice."); }
+    finally { setBusy(false); }
+  }
+
+  async function confirm(e: FormEvent) {
+    e.preventDefault(); setError(""); setBusy(true);
+    try {
+      const data = await confirmPayment(invoice!.id, reference.trim());
+      setMessage(data.note ?? "Reference recorded. Awaiting confirmation.");
+      if (data.invoice.status === "PAID") navigate(`/receipt/${invoice!.id}`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not confirm payment."); }
+    finally { setBusy(false); }
+  }
+
+  if (!session) return null;
+  const input = { display: "block", width: "100%", padding: 10, margin: "6px 0 12px", fontSize: 16 } as const;
+  return (
+    <div>
+      <h2>Pay</h2>
+      {!invoice ? (
+        <form onSubmit={create}>
+          <label>Payment method
+            <select style={input} value={methodId} onChange={(e) => setMethodId(e.target.value)}>
+              {methods.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.handle}</option>)}
+            </select>
+          </label>
+          <label>What is this for?
+            <input style={input} value={description} onChange={(e) => setDescription(e.target.value)} required />
+          </label>
+          <label>Amount (USD)
+            <input style={input} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="150.00" required />
+          </label>
+          {error && <p style={{ color: "red" }}>{error}</p>}
+          <button type="submit" disabled={busy}>{busy ? "Generating barcode…" : "Generate payment barcode"}</button>
+        </form>
+      ) : (
+        <div>
+          <h3>Invoice {invoice.number} — {invoice.amount} {invoice.currency}</h3>
+          <p>{message}</p>
+          {invoice.barcodeQrDataUrl && <img src={invoice.barcodeQrDataUrl} alt="Payment QR code" width={220} height={220} />}
+          <p>Barcode (Code128): <code>{invoice.barcodePayload}</code></p>
+          {crypto && (
+            <div style={{ border: "1px solid #ccc", padding: 12, margin: "12px 0" }}>
+              <strong>Crypto payment — {crypto.currency}</strong>
+              <p>Send exactly <strong>{crypto.amount} {crypto.currency}</strong> to:</p>
+              <p><code style={{ wordBreak: "break-all" }}>{crypto.address}</code></p>
+              <p>Reference: <code>{crypto.reference}</code>. Do not mark this paid until the payment is confirmed on-chain or by the provider.</p>
+            </div>
+          )}
+          <form onSubmit={confirm}>
+            <label>Payment reference (transaction hash / receipt ref)
+              <input style={input} value={reference} onChange={(e) => setReference(e.target.value)} required />
+            </label>
+            {error && <p style={{ color: "red" }}>{error}</p>}
+            <button type="submit" disabled={busy}>I have paid — submit reference</button>
+          </form>
+          <p><a href={`/receipt/${invoice.id}`}>View receipt</a></p>
+        </div>
+      )}
+    </div>
+  );
+}

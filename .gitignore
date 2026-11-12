@@ -1,35 +1,38 @@
-# Gradle files
-.gradle/
-build/
-.kotlin/
+# Dependencies
+node_modules/
+**/node_modules/
 
-# Local configuration file (sdk path, etc)
-local.properties
+# Env / secrets — NEVER commit these
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
 
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
+# Build outputs
+server/dist/
+server/build/
+apps/portal/dist/
+apps/portal/.vite/
+apps/android/app/build/
+apps/android/build/
+apps/android/.gradle/
+apps/android/local.properties
 *.apk
-output-metadata.json
+*.aab
 
-# IntelliJ
-*.iml
+# Prisma / DB (dev sqlite is local only)
+server/prisma/dev.db
+server/prisma/dev.db-journal
+*.db
+*.db-journal
+
+# Logs / OS
+*.log
+logs/
+.DS_Store
+Thumbs.db
 .idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
-
-# Keystore files
-*.jks
-*.keystore
-
-# Google Services (e.g. APIs or Firebase)
-google-services.json
-
-# Android Profiling
-*.hprof
+*.iml
+.vscode/*
+!.vscode/extensions.json

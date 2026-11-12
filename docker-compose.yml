@@ -1,0 +1,46 @@
+# JARVIS — server + Postgres (dev / staging)
+# Usage: cp server/.env.example server/.env, set DATABASE_URL to the
+# postgres URL below, then: docker compose up --build
+# The portal (apps/portal) and Android app are NOT in this compose file;
+# run those locally (see README.md).
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: jarvis-server
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      # DATABASE_URL is read from server/.env at build/run time by Prisma.
+      # In compose, override it here if you do not use a .env file:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://jarvis:jarvis_dev_only@db:5432/jarvis?schema=public}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-env}
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+  db:
+    image: postgres:16-alpine
+    container_name: jarvis-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=jarvis
+      - POSTGRES_PASSWORD=jarvis_dev_only
+      - POSTGRES_DB=jarvis
+    ports:
+      - "5432:5432"
+    volumes:
+      - jarvis-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  jarvis-pgdata:
