@@ -1,0 +1,187 @@
+// JARVIS — Prisma data model, POSTGRES variant (Docker / production).
+// Postgres only: DATABASE_URL=postgresql://USER:PASS@HOST:5432/jarvis?schema=public
+// This file is a line-for-line copy of ../schema.prisma except for the
+// datasource provider below. Keep the two schemas in sync: same models,
+// same fields, same relations. Only the provider (and this header) differ.
+//
+// Local dev / tests keep using ../schema.prisma (SQLite). The Docker
+// image generates its Prisma client from THIS schema and runs
+// `prisma migrate deploy --schema=prisma/postgres/schema.prisma`.
+// Do NOT point this schema at a SQLite URL — Prisma will reject it
+// (P1012: the URL must start with the protocol `postgresql:`).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// NOTE: statuses / types are stored as plain strings (e.g. "ACTIVE",
+// "TERMINATED") in both schemas. The API contract is unchanged:
+// routes validate them with zod and compare string literals only.
+// (The sqlite schema keeps the same note — SQLite has no native enums;
+// Postgres could use enums, but strings keep the two schemas identical.)
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         String   @default("CUSTOMER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  portals      Portal[]
+  methods      PaymentMethod[]
+  blockedBy    BlockedUser[]
+}
+
+model Portal {
+  id          String       @id @default(cuid())
+  slug        String       @unique
+  name        String
+  description String?
+  currency    String       @default("USD")
+  status      String       @default("ACTIVE")
+  ownerId     String
+  owner       User         @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  grants   AccessGrant[]
+  methods  PortalPaymentMethod[]
+  invoices Invoice[]
+  traffic  TrafficLog[]
+  accounts LinkedAccount[]
+  blocked  BlockedUser[]
+}
+
+model AccessGrant {
+  id         String      @id @default(cuid())
+  portalId   String
+  portal     Portal      @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  email      String
+  codeHash   String
+  status     String      @default("ACTIVE")
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime    @default(now())
+
+  @@unique([portalId, email])
+  @@index([email])
+}
+
+model PaymentMethod {
+  id        String            @id @default(cuid())
+  type      String
+  label     String
+  // Public handle / URL / crypto address only — NEVER a secret or private key.
+  handle    String
+  details   String? // JSON string, e.g. {"note": "All Pockets Full Consulting"}
+  ownerId   String
+  owner     User              @relation(fields: [ownerId], references: [id])
+  createdAt DateTime          @default(now())
+
+  portals  PortalPaymentMethod[]
+  invoices Invoice[]
+}
+
+model PortalPaymentMethod {
+  id              String        @id @default(cuid())
+  portalId        String
+  portal          Portal        @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([portalId, paymentMethodId])
+}
+
+model Invoice {
+  id               String        @id @default(cuid())
+  number           String        @unique // JAR-1001, JAR-1002, …
+  portalId         String
+  portal           Portal        @relation(fields: [portalId], references: [id])
+  payerEmail       String
+  payerName        String?
+  amount           Decimal
+  currency         String        @default("USD")
+  status           String        @default("PENDING")
+  barcodePayload   String // JARVIS|<number>|<amount>|<currency>
+  barcodeQrDataUrl String?
+  emailStatus      String        @default("SIMULATED")
+  proofHash        String?
+  items            String // JSON: [{ description, amount }]
+  paymentMethodId  String?
+  paymentMethod    PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  createdAt        DateTime      @default(now())
+  paidAt           DateTime?
+
+  payments Payment[]
+}
+
+model Payment {
+  id         String        @id @default(cuid())
+  invoiceId  String
+  invoice    Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  method     String
+  amount     Decimal
+  currency   String        @default("USD")
+  reference  String? // txHash / Stripe payment_intent / provider ref
+  status     String        @default("PENDING")
+  simulated  Boolean       @default(true)
+  proofHash  String?
+  createdAt  DateTime      @default(now())
+}
+
+model TrafficLog {
+  id              String   @id @default(cuid())
+  portalId        String
+  portal          Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  ip              String
+  userAgent       String?
+  path            String?
+  hasAccess       Boolean  @default(false)
+  ptr             String?
+  country         String?
+  region          String?
+  city            String?
+  isp             String?
+  org             String?
+  lat             Float?
+  lon             Float?
+  lookupSource    String?
+  lookupSimulated Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([portalId, createdAt])
+  @@index([ip])
+}
+
+model BlockedUser {
+  id          String   @id @default(cuid())
+  portalId    String?
+  portal      Portal?  @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  email       String?
+  ip          String?
+  reason      String
+  blockedById String
+  blockedBy   User     @relation(fields: [blockedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([email])
+  @@index([ip])
+}
+
+model LinkedAccount {
+  id        String   @id @default(cuid())
+  portalId  String
+  portal    Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  type      String // STRIPE | CASH_APP | EMAIL | DOMAIN | OTHER …
+  label     String
+  handle    String // public identifier / URL — never a secret
+  notes     String?
+  createdAt DateTime @default(now())
+}

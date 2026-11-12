@@ -6,7 +6,8 @@ JARVIS is a monorepo with three runnable pieces and one source of truth
 for the data model:
 
 - **API server** (`server/`) — Node 20, Express, TypeScript, Prisma.
-  SQLite for dev, Postgres for prod. Owns all business rules.
+  SQLite for dev, Postgres for prod (two schemas — see "Data model"
+  below). Owns all business rules.
 - **Customer portal** (`apps/portal/`) — Vite + React + TypeScript. Public-
   facing; a customer only ever sees the one portal they have a grant for.
 - **Android control app** (`apps/android/`) — Kotlin + Jetpack Compose.
@@ -18,6 +19,52 @@ for the data model:
 
 Prisma schema: `server/prisma/schema.prisma`. All IDs are `cuid()` strings.
 All timestamps are UTC (`DateTime`, `@default(now())`).
+
+### Dual schema: SQLite (dev) / Postgres (Docker, prod)
+
+Prisma ties the datasource `provider` to the schema file, and the client
+validates the URL protocol against it at startup — a SQLite schema given
+a `postgresql://` URL crashes immediately with error **P1012** ("the URL
+must start with the protocol `file:`"). That is what killed the first
+GitHub Actions docker run (run 43210865406, 2026-11-12): the compose file
+passes a Postgres URL while the only schema was SQLite. So the repo
+carries **two schemas with identical models**:
+
+| | SQLite (dev / tests) | Postgres (Docker / prod) |
+|---|---|---|
+| Schema | `server/prisma/schema.prisma` | `server/prisma/postgres/schema.prisma` |
+| Provider | `sqlite` | `postgresql` |
+| Migrations | `server/prisma/migrations/` | `server/prisma/postgres/migrations/` |
+| URL | `file:./dev.db` (absolute path in tests) | `postgresql://USER:PASS@HOST:5432/jarvis?schema=public` |
+| Generate | `npx prisma generate` | `npx prisma generate --schema=prisma/postgres/schema.prisma` |
+| Migrate | `npx prisma migrate dev` | `npx prisma migrate deploy --schema=prisma/postgres/schema.prisma` |
+
+Rules:
+- **Keep the two schemas in sync.** Same models, same fields, same
+  relations — only the `provider` (and header comment) may differ. All
+  field types used are portable across both: `String`, `Int`-free
+  (none used), `Decimal` (Postgres: `DECIMAL(65,30)`), `DateTime`
+  (Postgres: `TIMESTAMP(3)`), `Boolean`, `Float` (Postgres:
+  `DOUBLE PRECISION`), `cuid()` ids. Statuses are plain strings in
+  both — no native enums anywhere.
+- **The Postgres init migration is generated, not hand-written:**
+  `DATABASE_URL=postgresql://... npx prisma migrate diff --from-empty
+  --to-schema-datamodel prisma/postgres/schema.prisma --script` (a
+  dummy local URL is enough — the command never connects). Regenerate
+  it the same way after any model change; never edit the SQL by hand.
+- **Docker:** `server/Dockerfile` generates the client from the Postgres
+  schema in the build stage and runs `migrate deploy --schema=...` in
+  its `CMD`. The GitHub Actions workflow builds `dist/` on the host
+  with the SQLite schema (for `tsc` only) — the runtime client is the
+  one from the image. The compose bind-mount `./server:/app` hides the
+  image's `/app/prisma`, but the host `./server/prisma` also contains
+  the `postgres/` folder, so the runtime `migrate deploy --schema=...`
+  still resolves; `/app/node_modules` is an anonymous volume, so the
+  Postgres-generated client survives the mount.
+- **Never mix them:** a `file:` URL with the Postgres schema, or a
+  `postgresql://` URL with the SQLite schema, fails at startup (P1012).
+  The test scripts always use absolute-path SQLite `DATABASE_URL`s and
+  the default schema — they never touch Postgres.
 
 ### User (Don / admins)
 

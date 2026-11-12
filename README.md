@@ -105,9 +105,23 @@ optional Whisper hook in `VoiceInput.kt` is disabled unless
 
 ```bash
 docker compose up --build
-# server on :4000, postgres on :5432. Set DATABASE_URL in .env to the
-# postgres URL (see .env.example) before running migrations in prod mode.
+# server on :4000, postgres on :5432.
 ```
+
+The compose file passes a `postgresql://...` `DATABASE_URL` to the server
+itself — you do **not** need to set it in `server/.env` for Docker.
+
+**Dual-schema rule (important):** there are two Prisma schemas with
+identical models — `server/prisma/schema.prisma` (SQLite, local dev and
+tests) and `server/prisma/postgres/schema.prisma` (Postgres, Docker /
+production). A SQLite URL only works with the SQLite schema and a
+Postgres URL only with the Postgres schema; mixing them crashes the
+server at startup with Prisma error P1012 ("the URL must start with the
+protocol `file:`"). The Dockerfile generates its Prisma client from the
+Postgres schema and runs `prisma migrate deploy
+--schema=prisma/postgres/schema.prisma` on start. Keep the two schemas
+in sync when you change a model — same fields, same relations, only the
+`provider` differs. Full detail: `docs/ARCHITECTURE.md` → "Data model".
 
 ## Environment variables
 
@@ -116,7 +130,7 @@ No real values are in this repo — only placeholders.
 
 | Variable | Required? | Notes |
 |---|---|---|
-| `DATABASE_URL` | yes | `file:./dev.db` for SQLite dev; `postgresql://...` for prod |
+| `DATABASE_URL` | yes | `file:./dev.db` for SQLite dev (pairs with `prisma/schema.prisma`); `postgresql://...` for Docker/prod (pairs with `prisma/postgres/schema.prisma` — never mix them, see §4) |
 | `JWT_SECRET` | yes | Long random string. Generate: `openssl rand -hex 32` |
 | `PORT` | no | Default `4000` |
 | `ADMIN_SEED_PASSWORD` | dev only | Seed admin password; change after first login |
@@ -171,7 +185,8 @@ jarvis-android-assistant/
 ├── docs/ARCHITECTURE.md         # data model, security, flows
 ├── docs/API.md                  # REST endpoints + examples
 ├── server/                      # Node 20 + Express + TS + Prisma
-│   ├── prisma/schema.prisma
+│   ├── prisma/schema.prisma     # SQLite — local dev / tests
+│   ├── prisma/postgres/schema.prisma  # Postgres — Docker / prod
 │   └── src/  index, db, middleware, utils, services, routes
 ├── apps/portal/                 # Vite + React + TS customer portal
 ├── apps/android/                # Kotlin + Jetpack Compose control app
