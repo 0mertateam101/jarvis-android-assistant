@@ -1,0 +1,142 @@
+# Jarvis — Docker end-to-end check (runs on GitHub's servers, not Don's phone).
+#
+# What it does: builds the server image, starts the compose stack
+# (server + real Postgres 16), waits for /health, then runs the full
+# customer flow — login → pay → receipt — against the docker server
+# (server/scripts/docker-e2e-test.sh). It reports back two ways:
+#   1. a comment on Issue #10 with the PASS/FAIL summary, and
+#   2. a report file at .github/docker-e2e-report.md committed back to
+#      main with "[skip ci]" (that file is outside this workflow's
+#      `paths:` filter, so the report commit cannot re-trigger the run).
+#
+# Why this runs in Actions: the local machine cannot start Docker
+# containers (sandbox restriction), so the docker check needs a real
+# host. Public repos get free Actions minutes on ubuntu-latest.
+#
+# NOTE on the compose file: docker-compose.yml bind-mounts ./server:/app,
+# which hides the image's own /app/dist. So the workflow builds dist/ on
+# the host first (npm ci + prisma generate + npm run build in server/)
+# before `docker compose up --build`. The DATABASE_URL / JWT_SECRET /
+# POSTGRES_PASSWORD in docker-compose.yml are throwaway dev values for
+# this test stack only — rotate them before any real deployment.
+name: Docker end-to-end check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/docker-e2e.yml"
+      - "server/scripts/docker-e2e-test.sh"
+      - "docker-compose.yml"
+      - "server/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  docker-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The compose file bind-mounts ./server:/app, hiding the image's
+      # dist/ — so dist/ must be built on the host first.
+      - name: Build server dist on host
+        working-directory: server
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+
+      - name: Install portal deps
+        working-directory: apps/portal
+        run: npm ci
+
+      - name: Start compose stack
+        run: docker compose up --build -d
+
+      - name: Wait for server health
+        run: |
+          for i in $(seq 1 36); do
+            if curl -sf http://localhost:4000/health >/dev/null; then
+              echo "server healthy after ${i} tries"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "server never became healthy"
+          docker compose ps
+          docker compose logs --tail=200 server
+          exit 1
+
+      - name: Run Docker e2e checks
+        id: e2e
+        run: |
+          set +e
+          BASE_URL=http://localhost:4000 bash server/scripts/docker-e2e-test.sh 2>&1 | tee /tmp/docker-e2e.log
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Dump compose logs on failure
+        if: steps.e2e.outputs.exit != '0'
+        run: docker compose logs --tail=300 server db || true
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v || true
+
+      - name: Write report file
+        if: always()
+        run: |
+          {
+            echo "# Docker end-to-end check — report"
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Commit: ${{ github.sha }}"
+            echo "Date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            if [ "${{ steps.e2e.outputs.exit }}" = "0" ]; then
+              echo "**Result: PASS — all Docker e2e checks passed.**"
+            else
+              echo "**Result: FAIL — exit code ${{ steps.e2e.outputs.exit }}. See the run log linked above.**"
+            fi
+            echo ""
+            echo '```'
+            grep -E "^(PASS|FAIL|== Summary|ALL DOCKER|SOME DOCKER)" /tmp/docker-e2e.log || echo "(no check lines captured — the e2e step itself failed to run)"
+            echo '```'
+          } > .github/docker-e2e-report.md
+          cat .github/docker-e2e-report.md
+
+      - name: Commit report back to main
+        if: always()
+        run: |
+          git config user.name "jarvis-ci"
+          git config user.email "jarvis-ci@users.noreply.github.com"
+          git add .github/docker-e2e-report.md
+          git commit -m "Docker e2e report [skip ci]" || echo "nothing to commit"
+          git push || echo "push failed (nothing new or no permission)"
+
+      - name: Comment result on Issue #10
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.e2e.outputs.exit }}" = "0" ]; then
+            RESULT="PASS — all Docker e2e checks passed on GitHub's runner."
+          else
+            RESULT="FAIL — exit code ${{ steps.e2e.outputs.exit }}. See the run log."
+          fi
+          BODY="Docker end-to-end check (run ${{ github.run_id }}, commit ${{ github.sha }}): $RESULT Full report: .github/docker-e2e-report.md — $(grep -E '^== Summary' /tmp/docker-e2e.log || echo 'no summary captured')"
+          gh issue comment 10 --body "$BODY" || echo "comment failed"
+
+      - name: Fail the job if e2e failed
+        if: steps.e2e.outputs.exit != '0'
+        run: exit 1
