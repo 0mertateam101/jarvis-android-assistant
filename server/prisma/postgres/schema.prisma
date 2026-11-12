@@ -56,6 +56,8 @@ model Portal {
   traffic  TrafficLog[]
   accounts LinkedAccount[]
   blocked  BlockedUser[]
+  idVerifications IdVerification[]
+  assets   PortalAsset[]
 }
 
 model AccessGrant {
@@ -184,4 +186,51 @@ model LinkedAccount {
   handle    String // public identifier / URL — never a secret
   notes     String?
   createdAt DateTime @default(now())
+}
+
+// ID verification — a customer's identity documents for a portal.
+// PII: the image files live under server/uploads/id-verifications/ and
+// are NEVER served publicly, never logged, and never committed.
+// idType has NO passport option (Don's rule): DRIVERS_LICENSE,
+// STATE_ID, or NATIONAL_ID only. A re-upload replaces the record
+// (upsert on portalId+email) and resets status to PENDING.
+// Payment is NOT blocked by verification — an unverified customer can
+// still pay; verification is a trust record for Don to review.
+model IdVerification {
+  id           String    @id @default(cuid())
+  portalId     String
+  portal       Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  email        String
+  idType       String // DRIVERS_LICENSE | STATE_ID | NATIONAL_ID (never PASSPORT)
+  frontPath    String // server-side relative path under server/uploads/ — never returned to customers
+  backPath     String
+  selfiePath   String // the recipient holding the ID
+  status       String    @default("PENDING") // PENDING | VERIFIED | REJECTED
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([portalId, email])
+  @@index([portalId])
+}
+
+// Portal customisation files Don uploads (logo, banner, images,
+// documents). Publicly downloadable ONLY through the assets file route,
+// which streams by asset id — never a static directory listing.
+// ID verification images are a different model and are NEVER reachable
+// through the assets route.
+model PortalAsset {
+  id           String   @id @default(cuid())
+  portalId     String
+  portal       Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  kind         String // LOGO | BANNER | IMAGE | DOCUMENT | FILE
+  originalName String
+  storedPath   String // server-side relative path under server/uploads/
+  mimeType     String
+  size         Int
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  @@index([portalId])
 }

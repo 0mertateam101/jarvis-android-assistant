@@ -58,7 +58,8 @@ Lists Don's portals. Response: `{ portals: [Portal, …] }`.
 ### `GET /api/portals/:id` — ADMIN
 `:id` accepts the portal id **or** its slug; an unknown id or slug
 returns `404`. Response: `{ portal: Portal }` (always includes the
-linked accounts and the assigned payment methods).
+linked accounts, the assigned payment methods, and the portal's assets
+— plus `logoAssetId` / `bannerAssetId`, null when not set).
 
 ### `PATCH /api/portals/:id` — ADMIN
 Body: any of `{ name, description, currency, status }`
@@ -164,7 +165,11 @@ method (or one Don does not own) → `404`. Response `200`: `{ ok: true }`.
 
 ### `GET /api/portals/:slug/public-methods` — public / customer
 Lists only the methods assigned to that portal (label, type, handle).
-Used by the portal Pay page. No admin data is exposed.
+Used by the portal Pay page. No admin data is exposed. The response
+also carries the portal's branding for the customer portal to render:
+`logoAssetId` / `bannerAssetId` (null when not set) and `documents`
+(`[{ id, kind, originalName, mimeType, size }]`) with download links
+via the asset file route below.
 
 ---
 
@@ -231,7 +236,13 @@ rates and Don still has to confirm manually. A non-crypto invoice → `400`.
 Cross-portal customer → `403`; unknown invoice → `404`.
 
 ### `POST /api/payments/:invoiceId/confirm` — customer JWT or ADMIN
-Body: `{ "reference": "txHash / payment_intent / receipt ref", "method": "CASH_APP", "adminConfirm": true }`
+Body: `{ "reference": "txHash / payment_intent / receipt ref", "method": "CASH_APP", "adminConfirm": true, "captchaToken": "…" }`
+- **reCAPTCHA (Prompt 12):** a CUSTOMER submit must prove it is human.
+  With no `RECAPTCHA_SECRET_KEY` configured (SIMULATED mode) the check
+  always passes and the response carries `captcha: { required: false,
+  ok: true, simulated: true }`. When configured, a missing or invalid
+  `captchaToken` is a `400` and nothing is recorded. Don's ADMIN manual
+  confirm never needs a captcha.
 - Fiat/wallet: records the payment; Don's manual confirm (or a Stripe
   webhook — see `payments.ts`) flips the invoice to `PAID`.
 - Crypto: the `reference` must be a transaction hash (64 hex chars,
@@ -353,6 +364,76 @@ Response `200`: `{ ok: true }`. The account must belong to a portal Don
 owns, otherwise `404`. If `?portalId=` is supplied and the account
 belongs to a different portal, that is also a `404` — deletes never
 cross portals.
+
+---
+
+## ID verification (Prompt 12)
+
+A customer uploads pictures of their ID — front, back, and a picture of
+themselves holding the ID — so Don can verify who is paying on a portal.
+**Payment is NOT blocked by verification**: an unverified customer can
+still pay; verification is a trust record for Don to review.
+
+- `idType` is `DRIVERS_LICENSE` | `STATE_ID` | `NATIONAL_ID`. There is
+  **no passport option** — a `PASSPORT` idType is a `400`.
+- All three images are required, jpeg/png/webp only, each ≤ 10 MB.
+- Files live under `server/uploads/id-verifications/<portalId>/` with
+  random server-side filenames (gitignored, never committed). They are
+  NEVER served publicly and NEVER returned in an API response — only the
+  status + idType leave the server. Paths are never logged.
+
+### `POST /api/portals/:portalId/id-verification` — CUSTOMER (own portal + own email)
+Multipart form: `idType`, `front`, `back`, `selfie` (image files).
+Response `201`: `{ verification: { id, portalId, email, idType, status,
+reviewedById, reviewedAt, createdAt, updatedAt } }` — no file paths.
+One record per (portal, email): a re-upload replaces the record and
+resets status to `PENDING`. Other-portal customer → `403`; missing
+image / non-image / oversized file / bad idType → `400`.
+
+### `GET /api/portals/:portalId/id-verification/me` — CUSTOMER (own portal + own email)
+Returns the customer's own record, or `404` when none was uploaded yet.
+
+### `GET /api/portals/:portalId/id-verification` — ADMIN
+Lists the portal's verifications (status + idType only, no paths).
+Unknown / unowned portal → `404`.
+
+### `POST /api/portals/:portalId/id-verification/:id/review` — ADMIN
+Body: `{ "status": "VERIFIED" | "REJECTED" }`. Sets the status and the
+reviewer + review time. Unknown id / unowned portal → `404`.
+
+### `GET /api/portals/:portalId/id-verification/:id/image/:field` — ADMIN (owner) or owning CUSTOMER
+`:field` is `front` | `back` | `selfie`. Streams the image with the
+right content-type. Anyone else → `403`; unknown field/id → `404`.
+
+---
+
+## Portal assets — Don customises a portal (Prompt 12)
+
+Pictures, logos, banners and documents Don uploads to make a portal his
+own. Upload/list/delete are ADMIN-only and owner-scoped. The file
+itself is public **only** through the file route below, which streams by
+asset id — never a static directory listing. ID verification images are
+a different model and are NEVER reachable through this route.
+
+### `POST /api/portals/:portalId/assets` — ADMIN
+Multipart form: `file` + `kind` (`LOGO` | `BANNER` | `IMAGE` |
+`DOCUMENT` | `FILE`). Images (jpeg/png/webp/gif, ≤ 10 MB) for
+LOGO/BANNER/IMAGE; documents (pdf/doc/docx/txt, ≤ 25 MB) for
+DOCUMENT/FILE. Executables, archives and anything else → `400`, as does
+a document filed as LOGO (or an image filed as DOCUMENT). One LOGO and
+one BANNER per portal max — a new upload replaces the old (old file +
+record deleted). Response `201`: `{ asset: { id, portalId, kind,
+originalName, mimeType, size, createdAt } }`.
+
+### `GET /api/portals/:portalId/assets` — ADMIN
+Lists the portal's assets. Unknown / unowned portal → `404`.
+
+### `DELETE /api/portals/:portalId/assets/:id` — ADMIN
+Deletes the record **and** the file. Response `200`: `{ ok: true }`.
+
+### `GET /api/portals/:slug/assets/:id/file` — public
+Streams the file. Images are `inline` (the portal renders logo/banner);
+documents are `attachment` downloads. Unknown portal or asset → `404`.
 
 ---
 

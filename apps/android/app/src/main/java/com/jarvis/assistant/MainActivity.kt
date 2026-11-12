@@ -37,7 +37,8 @@ import androidx.core.content.ContextCompat
 //   1. Sign in (admin email + password → JWT)
 //   2. Jarvis command bar (text + mic) + portal list
 //   3. Portal detail: invite by email (code shown ONCE), grants,
-//      payment methods, traffic/security report, block/terminate.
+//      payment methods, traffic/security report, block/terminate,
+//      ID verification review (verify / reject).
 
 class MainActivity : ComponentActivity() {
 
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
                 onCreateMethod = { type, label, handle -> viewModel.createPaymentMethod(type, label, handle) },
                 onAssignMethod = { method, portal -> viewModel.assignMethod(method, portal) },
                 onUnassignMethod = { method, portal -> viewModel.unassignMethod(method, portal) },
+                onReviewVerification = { verification, portal, status -> viewModel.reviewVerification(verification, portal, status) },
             )
         }
     }
@@ -96,6 +98,7 @@ fun JarvisScreen(
     onCreateMethod: (String, String, String) -> Unit,
     onAssignMethod: (PaymentMethod, Portal) -> Unit,
     onUnassignMethod: (PaymentMethod, Portal) -> Unit,
+    onReviewVerification: (IdVerification, Portal, String) -> Unit,
 ) {
     if (!state.loggedIn) {
         LoginScreen(onLogin = onLogin, error = state.error)
@@ -129,6 +132,7 @@ fun JarvisScreen(
                     portal = portal,
                     grants = state.grants,
                     traffic = state.traffic,
+                    verifications = state.verifications,
                     methods = state.methods,
                     assignedMethods = state.assignedMethods,
                     onInvite = onInvite,
@@ -136,6 +140,7 @@ fun JarvisScreen(
                     onCreateMethod = onCreateMethod,
                     onAssignMethod = onAssignMethod,
                     onUnassignMethod = onUnassignMethod,
+                    onReviewVerification = onReviewVerification,
                 )
             }
         }
@@ -172,6 +177,7 @@ fun PortalDetail(
     portal: Portal,
     grants: List<Grant>,
     traffic: List<TrafficLog>,
+    verifications: List<IdVerification>,
     methods: List<PaymentMethod>,
     assignedMethods: List<PaymentMethod>,
     onInvite: (String, Portal) -> Unit,
@@ -179,6 +185,7 @@ fun PortalDetail(
     onCreateMethod: (String, String, String) -> Unit,
     onAssignMethod: (PaymentMethod, Portal) -> Unit,
     onUnassignMethod: (PaymentMethod, Portal) -> Unit,
+    onReviewVerification: (IdVerification, Portal, String) -> Unit,
 ) {
     var inviteEmail by remember { mutableStateOf("") }
     var blockEmail by remember { mutableStateOf("") }
@@ -221,6 +228,19 @@ fun PortalDetail(
                 }
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Text("ID verifications (review)", fontWeight = FontWeight.Bold)
+        Text("Customers upload front, back and a selfie holding the ID. Passports are never accepted. View the pictures in the portal app or browser — only the status is shown here.")
+        verifications.forEach { v ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${v.email} — ${v.idType} — ${v.status}", modifier = Modifier.weight(1f))
+                if (v.status == "PENDING") {
+                    Button(onClick = { onReviewVerification(v, portal, "VERIFIED") }) { Text("Verify") }
+                    OutlinedButton(onClick = { onReviewVerification(v, portal, "REJECTED") }) { Text("Reject") }
+                }
+            }
+        }
+        if (verifications.isEmpty()) Text("No ID verifications yet.")
         Spacer(Modifier.height(8.dp))
         Text("Unauthorised visits (reverse lookup)")
         traffic.forEach { t -> Text("${t.ip} — ${t.city ?: "UNKNOWN"}, ${t.country ?: ""} — ${t.isp ?: "UNKNOWN"}") }

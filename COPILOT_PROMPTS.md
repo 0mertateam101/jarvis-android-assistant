@@ -1,6 +1,6 @@
-# COPILOT_PROMPTS — 11 ordered prompts for GitHub Copilot Agent / VS Code Copilot
+# COPILOT_PROMPTS — 12 ordered prompts for GitHub Copilot Agent / VS Code Copilot
 
-Work through these **in order (1 → 11)**. Each prompt is copy-paste ready.
+Work through these **in order (1 → 12)**. Each prompt is copy-paste ready.
 Open the repo in VS Code with Copilot Chat (or GitHub Copilot Agent), paste
 one prompt, review the diff, run the checks it names, then move on.
 Do not skip ahead — later prompts depend on earlier ones.
@@ -191,7 +191,95 @@ Do not skip ahead — later prompts depend on earlier ones.
 
 ---
 
-## After all 11
+## Prompt 12 — ID verification uploads, reCAPTCHA before payment, portal file uploads
+
+> Three features sharing one upload infrastructure (multer, files under
+> `server/uploads/` — gitignored, never committed, never served as a
+> public static path; random server-side filenames, never the
+> user-supplied name).
+>
+> **1. ID verification.** Add an `IdVerification` model to BOTH Prisma
+> schemas (keep them identical except provider) + a migration for each
+> (`prisma migrate diff --from-schema-datamodel <old> --to-schema-datamodel
+> <new> --script`, one per provider): id, portalId (FK Portal, cascade),
+> email, idType (`DRIVERS_LICENSE` | `STATE_ID` | `NATIONAL_ID` — NO
+> passport option anywhere), frontPath, backPath, selfiePath, status
+> (`PENDING` | `VERIFIED` | `REJECTED`, default PENDING), reviewedById?,
+> reviewedAt?, createdAt, updatedAt; unique per (portalId, email) — a
+> re-upload replaces the record and resets status to PENDING. New route
+> file `server/src/routes/verification.ts` (mounted in `src/index.ts`
+> before `portalsRouter`): `POST /api/portals/:portalId/id-verification`
+> (CUSTOMER, own portal + own email only; multipart `idType`, `front`,
+> `back`, `selfie` — all three images required, jpeg/png/webp only, each
+> ≤ 10 MB; return 201 with the record minus file paths);
+> `GET .../id-verification/me` (CUSTOMER own record);
+> `GET .../id-verification` (ADMIN, owner-scoped list, no paths);
+> `POST .../id-verification/:id/review` (ADMIN, `{ status: VERIFIED |
+> REJECTED }`); `GET .../id-verification/:id/image/:field` (ADMIN
+> owner-scoped OR owning CUSTOMER; streams the image; 403 otherwise,
+> 404 for unknown field/id). Negatives: other-portal customer 403,
+> missing image 400, non-image 400, oversized 400, bad idType (incl.
+> `PASSPORT`) 400. ID images are sensitive PII: never log paths beyond
+> the record id, never include image bytes in any response. Payment is
+> NOT blocked by verification. Customer portal: ID section on PortalHome
+> (type picker with the three options + "no passports" note, three file
+> inputs with previews, submit, current status shown).
+>
+> **2. reCAPTCHA before payment.** Add `server/src/services/captcha.ts`:
+> `verifyCaptcha(token)` returns `{ required, ok, simulated }`. No
+> `RECAPTCHA_SECRET_KEY` configured → required=false, ok=true,
+> simulated=true (SIMULATED, clearly labelled, nothing sent to Google).
+> Configured → missing token fails; otherwise POST to Google's siteverify
+> with a 5s timeout and return Google's `success`; a network error is
+> NOT verified, never a pass. Add `RECAPTCHA_SECRET_KEY` +
+> `RECAPTCHA_SITE_KEY` to `.env.example` (no real keys). Enforce in
+> `POST /api/payments/:invoiceId/confirm` ONLY for CUSTOMER callers
+> without `adminConfirm` (accept optional `captchaToken`; configured +
+> missing/invalid → 400; simulated → proceed with
+> `captcha: { simulated: true }` in the response). Don's ADMIN manual
+> confirm is unchanged (no captcha). Portal Pay page: when
+> `VITE_RECAPTCHA_SITE_KEY` is set, load the reCAPTCHA v2 script,
+> render the checkbox, keep the submit button disabled until solved, and
+> send the token; when unset, show a clearly-labelled simulated notice
+> and leave the button enabled. No captcha npm dependency.
+>
+> **3. Portal file uploads.** Add a `PortalAsset` model to BOTH schemas
+> + both migrations: id, portalId (FK Portal, cascade), kind (`LOGO` |
+> `BANNER` | `IMAGE` | `DOCUMENT` | `FILE`), originalName, storedPath,
+> mimeType, size, uploadedById, createdAt. New route file
+> `server/src/routes/assets.ts` (mounted before `portalsRouter`):
+> `POST /api/portals/:portalId/assets` (ADMIN, owner-scoped; multipart
+> `file` + `kind`; images jpeg/png/webp/gif ≤ 10 MB for LOGO/BANNER/IMAGE,
+> documents pdf/doc/docx/txt ≤ 25 MB for DOCUMENT/FILE; executables and
+> archives → 400; one LOGO and one BANNER per portal max — a new upload
+> replaces the old, file + record deleted);
+> `GET /api/portals/:portalId/assets` (ADMIN list);
+> `DELETE /api/portals/:portalId/assets/:id` (ADMIN, deletes record +
+> file); `GET /api/portals/:slug/assets/:id/file` (public; streams the
+> file — inline for images, attachment for documents; 404 otherwise;
+> ID verification images must NEVER be reachable here). Extend
+> `GET /api/portals/:id` with `logoAssetId` / `bannerAssetId` and the
+> public-methods response with logo/banner/documents. PortalHome shows
+> the logo/banner when set and lists documents with download links.
+> Android: ID-verification review section (list + VERIFIED/REJECTED).
+>
+> Update `docs/API.md`, `docs/ARCHITECTURE.md`, `README.md`. Document
+> the uploads dir + gitignore, the no-passport rule, the captcha
+> simulated-vs-configured rule, PII handling, and that payment is NOT
+> blocked by verification. Add a test script
+> `server/scripts/id-captcha-assets-test.sh` (fresh test DB, absolute
+> `DATABASE_URL`, real exit code) covering all three features including
+> the negatives, plus a configured-captcha run with a dummy secret
+> (submit without token → 400, garbage token → 400). Run it, plus
+> `npx tsc --noEmit`, `npm run build` in `apps/portal`, and re-run
+> `payments-test.sh` / `crypto-test.sh` (SIMULATED) for regressions.
+
+**Touches:** `server/prisma/schema.prisma`, `server/prisma/postgres/schema.prisma`, `server/prisma/migrations/*`, `server/prisma/postgres/migrations/*`, `server/package.json`, `server/src/services/uploads.ts`, `server/src/services/captcha.ts`, `server/src/routes/verification.ts`, `server/src/routes/assets.ts`, `server/src/routes/payments.ts`, `server/src/routes/portals.ts`, `server/src/index.ts`, `server/.env.example`, `.gitignore`, `apps/portal/src/api.ts`, `apps/portal/src/pages/Pay.tsx`, `apps/portal/src/pages/PortalHome.tsx`, `apps/android/app/src/main/java/com/jarvis/assistant/ApiClient.kt`, `apps/android/app/src/main/java/com/jarvis/assistant/JarvisViewModel.kt`, `apps/android/app/src/main/java/com/jarvis/assistant/MainActivity.kt`, `docs/API.md`, `docs/ARCHITECTURE.md`, `README.md`, `server/scripts/id-captcha-assets-test.sh`
+**Done when:** ID upload (201, PENDING, no paths returned) + re-upload resets to PENDING + review flips VERIFIED + image streams only to Don/owner; customer payment submit without token succeeds in SIMULATED mode (response says simulated) and fails 400 in configured mode (no token or garbage token); ADMIN confirm needs no captcha; LOGO/BANNER/DOCUMENT upload + replace + public download + delete all work; `id-captcha-assets-test.sh` passes; `tsc` clean; portal builds; no regression in the payments/crypto scripts.
+
+---
+
+## After all 12
 
 Run `docker compose up --build`, repeat Prompt 9's end-to-end flow, then
 ask Don for the first real portal name + its payment methods before

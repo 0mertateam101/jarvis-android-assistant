@@ -17,6 +17,7 @@ data class PaymentMethod(val id: String, val type: String, val label: String, va
 data class Grant(val id: String, val email: String, val status: String)
 data class TrafficLog(val ip: String, val country: String?, val city: String?, val isp: String?, val hasAccess: Boolean, val createdAt: String)
 data class InviteResult(val email: String, val code: String)
+data class IdVerification(val id: String, val email: String, val idType: String, val status: String, val createdAt: String)
 
 class ApiClient {
     companion object {
@@ -143,6 +144,21 @@ class ApiClient {
     /** Block + terminate a user for a policy violation. */
     fun blockUser(portalId: String, email: String, reason: String) {
         request("/api/security/block", "POST", JSONObject().put("portalId", portalId).put("email", email).put("reason", reason))
+    }
+
+    // --- ID verification review (Don only) ---
+    /** ID verification submissions for a portal — status + idType only, never the images here. */
+    fun listVerifications(portalId: String): List<IdVerification> {
+        val data = request("/api/portals/$portalId/id-verification", "GET")
+        return (0 until dataArray(data, "verifications").length()).map { i ->
+            val o = dataArray(data, "verifications").getJSONObject(i)
+            IdVerification(o.getString("id"), o.getString("email"), o.getString("idType"), o.getString("status"), o.getString("createdAt"))
+        }
+    }
+
+    /** Mark a verification VERIFIED or REJECTED. Images are viewed in the portal app / browser, not here. */
+    fun reviewVerification(portalId: String, verificationId: String, status: String) {
+        request("/api/portals/$portalId/id-verification/$verificationId/review", "POST", JSONObject().put("status", status))
     }
 
     class ApiException(message: String) : Exception(message)

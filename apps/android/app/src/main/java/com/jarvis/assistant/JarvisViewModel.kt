@@ -26,6 +26,7 @@ data class JarvisUiState(
     val methods: List<PaymentMethod> = emptyList(),
     val grants: List<Grant> = emptyList(),
     val traffic: List<TrafficLog> = emptyList(),
+    val verifications: List<IdVerification> = emptyList(),
     val assignedMethods: List<PaymentMethod> = emptyList(),
     val selectedPortal: Portal? = null,
     val lastInvite: InviteResult? = null,
@@ -72,14 +73,27 @@ class JarvisViewModel(private val api: ApiClient = ApiClient()) : ViewModel() {
     }
 
     fun selectPortal(portal: Portal) {
-        update { it.copy(selectedPortal = portal, grants = emptyList(), traffic = emptyList(), assignedMethods = emptyList(), lastInvite = null) }
+        update { it.copy(selectedPortal = portal, grants = emptyList(), traffic = emptyList(), verifications = emptyList(), assignedMethods = emptyList(), lastInvite = null) }
         viewModelScope.launch {
             try {
                 val grants = withContext(Dispatchers.IO) { api.listGrants(portal.id) }
                 val traffic = withContext(Dispatchers.IO) { api.listTraffic(portal.id) }
+                val verifications = withContext(Dispatchers.IO) { api.listVerifications(portal.id) }
                 val assigned = withContext(Dispatchers.IO) { api.assignedMethods(portal.id) }
-                update { it.copy(grants = grants, traffic = traffic, assignedMethods = assigned) }
+                update { it.copy(grants = grants, traffic = traffic, verifications = verifications, assignedMethods = assigned) }
             } catch (e: Exception) { setError(e.message ?: "Could not load portal details.") }
+        }
+    }
+
+    /** Mark a customer's ID verification VERIFIED or REJECTED (Prompt 12). */
+    fun reviewVerification(verification: IdVerification, portal: Portal, status: String) {
+        if (status != "VERIFIED" && status != "REJECTED") { setError("Review status must be VERIFIED or REJECTED."); return }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.reviewVerification(portal.id, verification.id, status) }
+                setMessage("${verification.email} ID ${status.lowercase()}.")
+                selectPortal(portal)
+            } catch (e: Exception) { setError(e.message ?: "Could not review verification.") }
         }
     }
 

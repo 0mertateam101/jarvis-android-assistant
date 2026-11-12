@@ -27,6 +27,9 @@ configured (see **Simulated vs Real** below).
 | 9 | Block / terminate users for policy violation | `AccessGrant.status = TERMINATED` + `BlockedUser` |
 | 10 | Invoice receipt on completed payment, with proof | `Invoice` `JAR-1001+`, PDF via `invoice.ts` |
 | 11 | Link all account info per portal | `LinkedAccount` — `server/src/routes/accounts.ts` |
+| 12 | ID verification (front, back, selfie holding the ID — no passports) | `IdVerification` — `server/src/routes/verification.ts` |
+| 13 | reCAPTCHA before payment, so we know it's a human | `server/src/services/captcha.ts` + Pay page checkbox |
+| 14 | Upload pictures, documents & files to customise portals | `PortalAsset` — `server/src/routes/assets.ts` |
 
 ## Architecture (text diagram)
 
@@ -137,6 +140,7 @@ No real values are in this repo — only placeholders.
 | `SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM` | no | Leave blank = SIMULATED email (logged + marked `SIMULATED` in DB) |
 | `STRIPE_SECRET_KEY` | no | Leave blank = SIMULATED card payments |
 | `BTCPAY_URL / BTCPAY_API_KEY` or `COINBASE_COMMERCE_API_KEY` | no | Leave blank = SIMULATED crypto confirm |
+| `RECAPTCHA_SECRET_KEY` / `RECAPTCHA_SITE_KEY` | no | Leave blank = SIMULATED captcha (payment submits not blocked, response says `simulated: true`). Set both for the reCAPTCHA v2 checkbox before payment. |
 | `WHISPER_API_KEY` | no | Android voice transcription; blank = on-device only |
 | `IP_LOOKUP_BASE_URL` | no | Default `http://ip-api.com` (free tier, no key) |
 | `APP_URL` | no | Public base URL shown on receipts, default `http://localhost:5173` |
@@ -164,6 +168,7 @@ anywhere in this repo.
 | Email | Logged to console + stored as `SIMULATED` / `QUEUED` in DB. No email leaves the server. | Sent via SMTP when `SMTP_*` are set. |
 | Card / wallet payment | Invoice marked `PENDING`; `completePayment` in dev only simulates confirmation. | Stripe (or other processor) webhook must confirm before `PAID`. |
 | Crypto payment | Address + amount shown; confirmation is **simulated** and clearly labelled. **Never mark paid on QR scan alone.** | BTCPay / Coinbase Commerce webhook (or on-chain check) confirms before `PAID`. |
+| reCAPTCHA | No check runs; payment submits pass and the response says `captcha.simulated: true`. | Customer must solve the checkbox before submitting; missing/invalid token is a `400`. |
 | IP reverse lookup | PTR via `dns.reverse` + free `ip-api.com` geo/ISP; falls back to `UNKNOWN` on failure. No paid lookup key needed. | Same flow; swap the provider in `ipLookup.ts` if you need a paid provider. |
 
 **Safety rules baked into the code:**
@@ -175,13 +180,17 @@ anywhere in this repo.
 - Jarvis never sends outreach, email, or payment requests without Don's
   explicit action in the app (human approval gate).
 - No secrets, wallet private keys, or seed phrases in code, docs, or logs.
+- ID verification pictures are sensitive PII: stored under
+  `server/uploads/` (gitignored, never committed), never served publicly,
+  never returned in an API response. Passports are not accepted as ID.
+  Verification never blocks payment.
 
 ## Repo layout
 
 ```
 jarvis-android-assistant/
 ├── README.md                    # this file
-├── COPILOT_PROMPTS.md           # 10 ordered prompts for Copilot Agent
+├── COPILOT_PROMPTS.md           # 12 ordered prompts for Copilot Agent
 ├── docker-compose.yml           # server + postgres
 ├── .github/muse-instructions.md # Copilot repo instructions
 ├── docs/ARCHITECTURE.md         # data model, security, flows
@@ -198,7 +207,7 @@ jarvis-android-assistant/
 ## Copilot — how to continue this build
 
 1. Read `.github/muse-instructions.md` first.
-2. Work through `COPILOT_PROMPTS.md` in order (1 → 10). Each prompt is
+2. Work through `COPILOT_PROMPTS.md` in order (1 → 12). Each prompt is
    self-contained and says which files it touches.
 3. Do not invent secrets, do not change the invoice numbering (`JAR-1001+`)
    or the barcode payload format (`JARVIS|<invoice>|<amount>|<currency>`)

@@ -27,6 +27,10 @@ server/prisma/dev.db-journal
 *.db
 *.db-journal
 
+# Uploads — ID verification images (PII) + portal assets (Prompt 12).
+# NEVER commit these: ID images are sensitive personal data.
+server/uploads/
+
 # Logs / OS
 *.log
 logs/

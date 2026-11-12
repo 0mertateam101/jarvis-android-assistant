@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { cryptoMode, cryptoReferenceError, getCryptoService, isCryptoType, verifyWebhookSignature } from "../services/crypto";
+import { verifyCaptcha } from "../services/captcha";
 import { buildProofHash } from "../services/invoice";
 import { sendReceiptEmail } from "./invoices";
 import { clientIp, isEmailBlocked, isIpBlocked } from "./security";
@@ -26,6 +27,9 @@ const methodSchema = z.object({
 const confirmSchema = z.object({
   reference: z.string().min(1).max(200),
   method: z.string().min(1).max(60).optional(),
+  // reCAPTCHA token from the Pay page (Prompt 12). Only checked for
+  // CUSTOMER submits — Don's ADMIN manual confirm never needs one.
+  captchaToken: z.string().max(2000).optional(),
   // Don's explicit manual confirm (admin only, dev/simulated mode).
   // In production with a real provider, the webhook — not this flag —
   // is what confirms. This flag is ignored for non-admin callers.
@@ -213,10 +217,13 @@ paymentsRouter.delete("/portals/:portalId/methods/:methodId", authMiddleware, re
 });
 
 // Public list of methods assigned to a portal (customer Pay page).
+// Also carries the portal's branding + downloadable documents (Prompt 12)
+// so the customer portal can render the logo/banner and list documents
+// without a second call — this is the portal's public read.
 paymentsRouter.get("/portals/:slug/public-methods", async (req, res) => {
   const portal = await prisma.portal.findUnique({
     where: { slug: req.params.slug },
-    include: { methods: { include: { paymentMethod: true } } },
+    include: { methods: { include: { paymentMethod: true } }, assets: true },
   });
   if (!portal) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
@@ -228,7 +235,12 @@ paymentsRouter.get("/portals/:slug/public-methods", async (req, res) => {
     label: m.paymentMethod.label,
     handle: m.paymentMethod.handle,
   }));
-  res.json({ ok: true, data: { methods } });
+  const logo = portal.assets.find((a) => a.kind === "LOGO") ?? null;
+  const banner = portal.assets.find((a) => a.kind === "BANNER") ?? null;
+  const documents = portal.assets
+    .filter((a) => a.kind === "DOCUMENT" || a.kind === "FILE")
+    .map((a) => ({ id: a.id, kind: a.kind, originalName: a.originalName, mimeType: a.mimeType, size: a.size }));
+  res.json({ ok: true, data: { methods, logoAssetId: logo?.id ?? null, bannerAssetId: banner?.id ?? null, documents } });
 });
 
 // --- Payment confirmation ---
@@ -238,6 +250,11 @@ paymentsRouter.get("/portals/:slug/public-methods", async (req, res) => {
 // provider verification, or Don's manual confirm — and Don's manual
 // confirm only works in SIMULATED mode. With a real provider configured,
 // manual confirm is refused and only the webhook can flip PAID.
+// CAPTCHA RULE (Prompt 12): a CUSTOMER submit must pass reCAPTCHA
+// (verifyCaptcha in services/captcha.ts) — in SIMULATED mode the check
+// always passes and is labelled simulated; when configured, a missing or
+// invalid token is a 400 and nothing is recorded. Don's ADMIN manual
+// confirm never needs a captcha.
 paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: AuthedRequest, res) => {
   const parsed = confirmSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -274,6 +291,23 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
   if ((await isEmailBlocked(invoice.portalId, invoice.payerEmail)) || (await isIpBlocked(clientIp(req), invoice.portalId))) {
     res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
     return;
+  }
+  // reCAPTCHA (Prompt 12): a CUSTOMER payment submit must come from a
+  // human. In SIMULATED mode (no RECAPTCHA_SECRET_KEY configured) the
+  // check always passes and the response says so — the submit is NOT
+  // blocked. When configured, a missing/invalid token is a 400 and
+  // nothing is recorded. Don's ADMIN manual confirm path below is
+  // unchanged and never needs a captcha.
+  let captcha: { required: boolean; ok: boolean; simulated: boolean } | undefined;
+  if (req.auth!.role === "CUSTOMER" && parsed.data.adminConfirm !== true) {
+    captcha = await verifyCaptcha(parsed.data.captchaToken);
+    if (!captcha.ok) {
+      res.status(400).json({
+        ok: false,
+        error: { code: "VALIDATION_ERROR", message: "Please complete the captcha to confirm you are human before submitting your payment." },
+      });
+      return;
+    }
   }
   const methodType = invoice.paymentMethod?.type ?? parsed.data.method ?? "UNKNOWN";
   let confirmed = false;
@@ -344,7 +378,7 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
   });
 
   if (!confirmed) {
-    res.json({ ok: true, data: { invoice, payment, note } });
+    res.json({ ok: true, data: { invoice, payment, note, ...(captcha ? { captcha } : {}) } });
     return;
   }
   const paidAt = new Date();
@@ -356,7 +390,7 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
   await prisma.payment.update({ where: { id: payment.id }, data: { proofHash: proof } });
   // Receipt email (queued or SIMULATED) now that the invoice is PAID.
   await sendReceiptEmail(invoice.id);
-  res.json({ ok: true, data: { invoice: updated, payment: { ...payment, proofHash: proof }, note } });
+  res.json({ ok: true, data: { invoice: updated, payment: { ...payment, proofHash: proof }, note, ...(captcha ? { captcha } : {}) } });
 });
 
 // --- Crypto provider webhook (BTCPay / Coinbase Commerce) ---

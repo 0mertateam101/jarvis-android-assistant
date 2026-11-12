@@ -8,11 +8,13 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { accessRouter } from "./routes/access";
 import { accountsRouter } from "./routes/accounts";
+import { assetsRouter } from "./routes/assets";
 import { authRouter } from "./routes/auth";
 import { invoicesRouter } from "./routes/invoices";
 import { paymentsRouter } from "./routes/payments";
 import { portalsRouter } from "./routes/portals";
 import { securityRouter } from "./routes/security";
+import { verificationRouter } from "./routes/verification";
 
 // JARVIS API server — see README.md and docs/API.md.
 // Simulated by default: no real money, email, or payment confirmation
@@ -50,6 +52,13 @@ app.use("/api/auth", authRouter);
 // portals router applies authMiddleware + requireAdmin to everything
 // under /api/portals. Mounted after it, the public route would 401.
 app.use("/api", paymentsRouter); // /api/payment-methods, /api/portals/:id/methods, /api/payments/:id/confirm
+// verificationRouter + assetsRouter are mounted BEFORE portalsRouter for
+// the same reason: they own routes under /api/portals that are NOT
+// admin-only (customer ID uploads, the public asset file stream), and
+// the portals router applies authMiddleware + requireAdmin to everything
+// under /api/portals. Mounted after it, those routes would 401/403.
+app.use("/api", verificationRouter); // /api/portals/:id/id-verification
+app.use("/api", assetsRouter); // /api/portals/:id/assets, /api/portals/:slug/assets/:id/file
 app.use("/api/portals", portalsRouter);
 app.use("/api/access/login", loginLimiter);
 app.use("/api/access", accessRouter);

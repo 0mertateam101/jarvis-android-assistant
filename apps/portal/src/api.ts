@@ -6,6 +6,11 @@ const API_URL = import.meta.env.VITE_API_URL as string | undefined ?? "http://lo
 
 export interface PortalInfo { id: string; slug: string; name: string; }
 export interface PublicMethod { id: string; type: string; label: string; handle: string; }
+export interface PublicDocument { id: string; kind: string; originalName: string; mimeType: string; size: number; }
+export interface IdVerification {
+  id: string; portalId: string; email: string; idType: string; status: string;
+  reviewedById: string | null; reviewedAt: string | null; createdAt: string; updatedAt: string;
+}
 export interface Invoice {
   id: string; number: string; amount: string; currency: string; status: string;
   barcodePayload: string; barcodeQrDataUrl: string | null; emailStatus: string;
@@ -74,7 +79,36 @@ export async function logVisit(portalSlug: string, hasAccess: boolean, path: str
 }
 
 export function getPublicMethods(slug: string) {
-  return request<{ methods: PublicMethod[] }>(`/api/portals/${encodeURIComponent(slug)}/public-methods`);
+  return request<{ methods: PublicMethod[]; logoAssetId: string | null; bannerAssetId: string | null; documents: PublicDocument[] }>(`/api/portals/${encodeURIComponent(slug)}/public-methods`);
+}
+
+/** Public download URL for a portal asset (logo/banner/document). */
+export function assetFileUrl(slug: string, assetId: string): string {
+  return `${API_URL}/api/portals/${encodeURIComponent(slug)}/assets/${encodeURIComponent(assetId)}/file`;
+}
+
+/** Upload ID verification pictures (front, back, selfie holding the ID).
+ *  Multipart — the JSON request() helper cannot send files. */
+export async function uploadIdVerification(portalId: string, idType: string, front: File, back: File, selfie: File) {
+  const token = getToken();
+  const form = new FormData();
+  form.append("idType", idType);
+  form.append("front", front);
+  form.append("back", back);
+  form.append("selfie", selfie);
+  const res = await fetch(`${API_URL}/api/portals/${encodeURIComponent(portalId)}/id-verification`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; data?: { verification: IdVerification }; error?: { message?: string } };
+  if (!res.ok || body.ok === false) throw new ApiError(res.status, body.error?.message ?? `Request failed (${res.status})`);
+  return body.data as { verification: IdVerification };
+}
+
+/** The customer's own ID verification record (404 when none uploaded yet). */
+export function getMyIdVerification(portalId: string) {
+  return request<{ verification: IdVerification }>(`/api/portals/${encodeURIComponent(portalId)}/id-verification/me`);
 }
 
 export function createInvoice(input: { portalSlug: string; payerEmail: string; payerName?: string; amount: string; currency: string; items: { description: string; amount: string }[]; paymentMethodId: string }) {
@@ -83,9 +117,9 @@ export function createInvoice(input: { portalSlug: string; payerEmail: string; p
   });
 }
 
-export function confirmPayment(invoiceId: string, reference: string) {
-  return request<{ invoice: Invoice; note?: string }>(`/api/payments/${encodeURIComponent(invoiceId)}/confirm`, {
-    method: "POST", body: JSON.stringify({ reference }),
+export function confirmPayment(invoiceId: string, reference: string, captchaToken?: string) {
+  return request<{ invoice: Invoice; note?: string; captcha?: { required: boolean; ok: boolean; simulated: boolean } }>(`/api/payments/${encodeURIComponent(invoiceId)}/confirm`, {
+    method: "POST", body: JSON.stringify({ reference, ...(captchaToken ? { captchaToken } : {}) }),
   });
 }
 

@@ -52,6 +52,10 @@ Rules:
   --to-schema-datamodel prisma/postgres/schema.prisma --script` (a
   dummy local URL is enough — the command never connects). Regenerate
   it the same way after any model change; never edit the SQL by hand.
+  Incremental migrations are generated the same way with
+  `--from-schema-datamodel <old schema> --to-schema-datamodel <new
+  schema>` (save a copy of the old schema first) for both providers,
+  so the two migration histories stay in step.
 - **Docker:** `server/Dockerfile` generates the client from the Postgres
   schema in the build stage and runs `migrate deploy --schema=...` in
   its `CMD`. The GitHub Actions workflow builds `dist/` on the host
@@ -230,6 +234,43 @@ LinkedAccount {
 A `type: OTHER` row with a note like "see password manager" is the correct
 pattern for anything credential-like.
 
+### IdVerification — customer ID pictures (Prompt 12)
+
+```
+IdVerification {
+  id, portalId -> Portal (cascade), email,
+  idType (DRIVERS_LICENSE | STATE_ID | NATIONAL_ID — never PASSPORT),
+  frontPath, backPath, selfiePath (server-side paths under
+    server/uploads/id-verifications/ — never returned to customers),
+  status (PENDING | VERIFIED | REJECTED, default PENDING),
+  reviewedById?, reviewedAt?, createdAt, updatedAt
+}
+@@unique([portalId, email]) — a re-upload replaces the record and resets
+status to PENDING.
+```
+
+ID images are sensitive PII: stored under `server/uploads/` (gitignored,
+never committed, never served publicly), streamed only through the
+authenticated image route to Don or the owning customer, and never
+logged beyond the record id. **Payment is NOT blocked by verification**
+— an unverified customer can still pay.
+
+### PortalAsset — portal customisation files (Prompt 12)
+
+```
+PortalAsset {
+  id, portalId -> Portal (cascade),
+  kind (LOGO | BANNER | IMAGE | DOCUMENT | FILE),
+  originalName, storedPath (server-side, under server/uploads/),
+  mimeType, size, uploadedById, createdAt
+}
+```
+
+One LOGO and one BANNER per portal max (a new upload replaces the old).
+Files are downloadable only through the public asset file route, which
+streams by asset id. ID verification images are a different model and
+are never reachable through this route.
+
 ## Security model
 
 | Actor | Auth | Can do |
@@ -246,6 +287,17 @@ pattern for anything credential-like.
 - CORS: portal origin (`APP_URL` / `PORTAL_ORIGIN`) and the Android app
   only. Never `*` with credentials.
 - Helmet headers on; `X-Powered-By` off.
+- **Uploads:** files live under `server/uploads/` (gitignored) with
+  random server-side filenames — the user-supplied name is stored in
+  the DB only. Uploads are never served as a public static path; each
+  file is streamed through a scoped route. ID verification images are
+  PII and are never returned in an API response or logged.
+- **reCAPTCHA (Prompt 12):** a CUSTOMER payment submit must pass
+  reCAPTCHA (`services/captcha.ts`). With no `RECAPTCHA_SECRET_KEY`
+  configured the check always passes and is labelled simulated. When
+  configured, a missing/invalid token is a `400` and nothing is
+  recorded; a network error reaching Google counts as NOT verified.
+  Don's ADMIN manual confirm never needs a captcha.
 
 ## Payment flows
 

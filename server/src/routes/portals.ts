@@ -75,12 +75,29 @@ portalsRouter.get("/:id", async (req: AuthedRequest, res) => {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;
   }
-  // Always include linked accounts + assigned payment methods (see docs/API.md).
+  // Always include linked accounts + assigned payment methods (see docs/API.md),
+  // plus the portal's customisation assets — the logo/banner ids are
+  // what the customer portal renders (Prompt 12).
   const full = await prisma.portal.findUnique({
     where: { id: portal.id },
-    include: { accounts: true, methods: { include: { paymentMethod: true } } },
+    include: { accounts: true, methods: { include: { paymentMethod: true } }, assets: true },
   });
-  res.json({ ok: true, data: { portal: full } });
+  if (!full) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
+    return;
+  }
+  const logo = full.assets.find((a) => a.kind === "LOGO") ?? null;
+  const banner = full.assets.find((a) => a.kind === "BANNER") ?? null;
+  res.json({
+    ok: true,
+    data: {
+      portal: {
+        ...full,
+        logoAssetId: logo?.id ?? null,
+        bannerAssetId: banner?.id ?? null,
+      },
+    },
+  });
 });
 
 // Canonical invoice list for a portal (see docs/API.md). :id accepts the
