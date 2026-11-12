@@ -16,8 +16,11 @@
 # bundle is grepped for localStorage (must be zero — the customer JWT
 # lives in sessionStorage only). There is no headless browser here, so
 # the UI itself is verified by exercising the exact API call sequence
-# the UI performs, in order, plus serving the built app. If a case cannot
-# be verified as written it is reported as a failure, never faked.
+# the UI performs, in order, plus serving the built app. Checks 21
+# verify CORS: the portal preview origin is allowed (otherwise the
+# browser blocks the login call — Prompt 15) and unrelated origins are
+# not. If a case cannot be verified as written it is reported as a
+# failure, never faked.
 #
 # Prerequisite: `npm ci` has been run in apps/portal/ (node_modules is
 # gitignored). Tokens and codes are NEVER printed in full; only a masked
@@ -302,6 +305,29 @@ else
     curl -s -m 3 "$PREVIEW_URL/" >/dev/null 2>&1 && { echo "FAIL: 20. preview server still running"; FAIL=$((FAIL+1)); } || echo "PASS: 20. preview server stopped"
   fi
 fi
+
+# 21. CORS (Prompt 15): the portal preview origin must be allowed or the
+#     browser blocks the login call; an unrelated origin must not be.
+#     A simple GET with an Origin header must echo that origin back in
+#     Access-Control-Allow-Origin; the browser's preflight (OPTIONS with
+#     Access-Control-Request-Method) must be answered the same way.
+curl -s -D /tmp/de2e-cors-4173.txt -o /dev/null "$BASE/health" -H "Origin: http://localhost:${PREVIEW_PORT}"
+ACO4173=$(grep -i '^access-control-allow-origin:' /tmp/de2e-cors-4173.txt | tr -d '\r' | awk '{print $2}')
+if [ "$ACO4173" = "http://localhost:${PREVIEW_PORT}" ]; then
+  echo "PASS: 21. CORS allows the portal preview origin (http://localhost:${PREVIEW_PORT})"
+else echo "FAIL: 21. CORS allow-origin for preview is '$ACO4173'"; FAIL=$((FAIL+1)); fi
+curl -s -D /tmp/de2e-cors-preflight.txt -o /dev/null -X OPTIONS "$BASE/api/access/login" \
+  -H "Origin: http://localhost:${PREVIEW_PORT}" \
+  -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type"
+ACOPF=$(grep -i '^access-control-allow-origin:' /tmp/de2e-cors-preflight.txt | tr -d '\r' | awk '{print $2}')
+if [ "$ACOPF" = "http://localhost:${PREVIEW_PORT}" ]; then
+  echo "PASS: 21. CORS preflight for the login call is allowed from the preview origin"
+else echo "FAIL: 21. CORS preflight allow-origin is '$ACOPF'"; FAIL=$((FAIL+1)); fi
+curl -s -D /tmp/de2e-cors-evil.txt -o /dev/null "$BASE/health" -H "Origin: https://evil.example.com"
+ACOEVIL=$(grep -i '^access-control-allow-origin:' /tmp/de2e-cors-evil.txt | tr -d '\r' | awk '{print $2}')
+if [ -z "$ACOEVIL" ]; then
+  echo "PASS: 21. CORS does not allow an unrelated origin (https://evil.example.com)"
+else echo "FAIL: 21. CORS allowed unrelated origin: '$ACOEVIL'"; FAIL=$((FAIL+1)); fi
 
 echo ""
 echo "== Summary: $FAIL failure(s) =="

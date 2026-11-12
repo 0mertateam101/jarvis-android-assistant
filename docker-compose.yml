@@ -6,6 +6,7 @@
 #   export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
 #   export DATABASE_URL="postgresql://jarvis:${POSTGRES_PASSWORD}@db:5432/jarvis?schema=public"
 #   export JWT_SECRET="$(openssl rand -hex 32)"
+#   export CORS_ORIGINS="https://portal.example.com"   # optional: extra allowed portal origins
 # Then: docker compose up --build
 # Compose fails fast with a clear error if POSTGRES_PASSWORD or
 # DATABASE_URL is unset — that is on purpose, so a stack never starts
@@ -28,6 +29,11 @@ services:
       # Compose aborts with a clear error if either is unset.
       - DATABASE_URL=${DATABASE_URL:?set DATABASE_URL}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-env}
+      # Extra allowed portal origins (comma-separated) — the server already
+      # allows APP_URL plus http://localhost:5173 (vite dev) and
+      # http://localhost:4173 (vite preview), so this is only needed for a
+      # portal served from another domain. Empty by default.
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
     ports:
       - "4000:4000"
     depends_on:

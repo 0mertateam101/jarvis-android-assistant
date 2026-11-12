@@ -152,6 +152,7 @@ No real values are in this repo — only placeholders.
 | `WHISPER_API_KEY` | no | Android voice transcription; blank = on-device only |
 | `IP_LOOKUP_BASE_URL` | no | Default `http://ip-api.com` (free tier, no key) |
 | `APP_URL` | no | Public base URL shown on receipts, default `http://localhost:5173` |
+| `CORS_ORIGINS` | no | Comma-separated extra origins allowed to call the API from a browser (CORS). The server always allows `APP_URL` plus `http://localhost:5173` (vite dev) and `http://localhost:4173` (vite preview); add a production portal domain here, otherwise the browser blocks the portal login. Leave blank when the portal runs on a local origin. |
 
 ### Example payment handles (Don's already-known handles — NOT secrets)
 

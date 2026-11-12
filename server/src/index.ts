@@ -25,7 +25,36 @@ const PORT = Number(process.env.PORT ?? 4000);
 
 app.disable("x-powered-by");
 app.use(helmet());
-app.use(cors({ origin: process.env.APP_URL ?? "http://localhost:5173", credentials: true }));
+// CORS allow-list: the customer portal is a browser app, so its origin
+// must be allowed or the browser blocks every API call — including the
+// customer login (Prompt 15: the Playwright preview on :4173 was blocked
+// because only APP_URL / :5173 was allowed). Allowed: APP_URL (default
+// http://localhost:5173, the vite dev server), plus a comma-separated
+// CORS_ORIGINS list for extra portal origins (e.g. a production portal
+// domain), plus the two local origins the portal runs on in dev/preview.
+// Requests with no Origin header (curl / server-to-server) are always
+// allowed. Anything else is rejected by the cors package's standard
+// behaviour (no Access-Control-Allow-Origin header). A literal "*" in
+// CORS_ORIGINS never matches a real Origin header, so there is no
+// wildcard — correct with credentials: true.
+const corsOrigins = new Set<string>([
+  process.env.APP_URL ?? "http://localhost:5173",
+  "http://localhost:5173",
+  "http://localhost:4173",
+  ...(process.env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+]);
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin || corsOrigins.has(origin)) cb(null, true);
+      else cb(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+  }),
+);
 app.use(
   express.json({
     limit: "1mb",
