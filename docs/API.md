@@ -129,17 +129,36 @@ Body:
 ```
 Types: `CASH_APP | VENMO | ZELLE | CHIME | PAYPAL | CARD | BANK | BTC | LTC | XMR | ETH`.
 `handle` is a public handle / URL / crypto address — never a secret.
+Anything that looks like a private key, seed phrase, mnemonic, password,
+API key, or raw 64-hex key in `handle` (or in `details`) is rejected with
+`400`. Handle format is checked loosely per type: `$username` for
+`CASH_APP` / `CHIME`, `@username` for `VENMO`, email or phone for `ZELLE` /
+`PAYPAL`, a plausible address for `BTC` / `LTC` / `XMR` / `ETH`
+(`0x` + 40 hex for `ETH`), 13–19 digits for `CARD`, at least 4 characters
+for `BANK`. A wrong format is a `400`.
 Response `201`: the `PaymentMethod`.
 
 ### `GET /api/payment-methods` — ADMIN
-Response: `{ methods: [PaymentMethod, …] }`.
+Response: `{ methods: [PaymentMethod, …] }` — only Don's own methods.
+
+### `GET /api/payment-methods/:id` — ADMIN
+Response: `{ method }`. Unknown id (or one Don does not own) → `404`.
+
+### `DELETE /api/payment-methods/:id` — ADMIN
+Deletes the method; its portal assignments are removed with it. Unknown
+id (or one Don does not own) → `404`. A method already used by an invoice
+→ `409`. Response `200`: `{ ok: true }`.
 
 ### `POST /api/portals/:portalId/methods` — ADMIN
 Body: `{ "paymentMethodId": "…" }` — assigns a method to a portal.
-Response `201`: the `PortalPaymentMethod` link.
+`:portalId` accepts the portal id or slug. Assigning the same method twice
+is idempotent — it returns the same link, never a duplicate.
+Response `201`: the `PortalPaymentMethod` link. Unknown portal or method
+(or one Don does not own) → `404`.
 
 ### `DELETE /api/portals/:portalId/methods/:methodId` — ADMIN
-Unassigns. Response `200`: `{ ok: true }`.
+Unassigns. `:portalId` accepts the portal id or slug. Unknown portal or
+method (or one Don does not own) → `404`. Response `200`: `{ ok: true }`.
 
 ### `GET /api/portals/:slug/public-methods` — public / customer
 Lists only the methods assigned to that portal (label, type, handle).

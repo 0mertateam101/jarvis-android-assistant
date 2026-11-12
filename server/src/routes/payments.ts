@@ -31,14 +31,88 @@ const confirmSchema = z.object({
 });
 
 // --- Payment methods (ADMIN) ---
+
+// Anything that looks like a secret — reject with a clear 400, never store it.
+// Same list as the linked-account check (Prompt 3, accounts.ts).
+const SECRET_PATTERNS: RegExp[] = [
+  /private\s*key/i,
+  /seed\s*phrase/i,
+  /\bmnemonic\b/i,
+  /\bpassword\b/i,
+  /api[-_ ]?key/i,
+  /client\s*secret/i,
+  /secret\s*key/i,
+  /-----BEGIN[^-]*PRIVATE KEY-----/i,
+  /\b[0-9a-f]{64}\b/i, // raw 64-hex private key
+];
+
+function looksLikeSecret(value: string): boolean {
+  return SECRET_PATTERNS.some((re) => re.test(value));
+}
+
+// Loose per-type format check for the public handle / address. Deliberately
+// loose — this is a sanity check, not a full validator. Returns an error
+// message, or null when the handle looks plausible for the type.
+function handleFormatError(type: string, handle: string): string | null {
+  switch (type) {
+    case "CASH_APP":
+    case "CHIME":
+      return /^\$[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(handle) ? null : "handle must look like $username";
+    case "VENMO":
+      return /^@[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(handle) ? null : "handle must look like @username";
+    case "ZELLE":
+    case "PAYPAL": {
+      const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(handle);
+      const digits = handle.replace(/\D/g, "");
+      const phone = /^\+?[0-9][0-9\s().-]{6,}$/.test(handle) && digits.length >= 7;
+      return email || phone ? null : "handle must be an email address or phone number";
+    }
+    case "BTC":
+      return /^(bc1[a-z0-9]{6,}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/.test(handle)
+        ? null
+        : "handle must be a BTC address";
+    case "LTC":
+      return /^(ltc1[a-z0-9]{6,}|[LM3][a-km-zA-HJ-NP-Z1-9]{26,33})$/.test(handle)
+        ? null
+        : "handle must be an LTC address";
+    case "XMR":
+      return /^4[0-9A-Za-z]{94}$/.test(handle) ? null : "handle must be an XMR address";
+    case "ETH":
+      return /^0x[a-fA-F0-9]{40}$/.test(handle) ? null : "handle must be an ETH address (0x + 40 hex chars)";
+    case "CARD":
+      return /^\d{13,19}$/.test(handle.replace(/[\s-]/g, "")) ? null : "handle must be a card number (13–19 digits)";
+    case "BANK":
+      return handle.trim().length >= 4 ? null : "handle must be at least 4 characters";
+    default:
+      return null;
+  }
+}
+
+// Look a portal up by id OR slug, scoped to the calling admin — same
+// behaviour as the portal routes (Prompt 3).
+async function findOwnedPortal(ownerId: string, idOrSlug: string) {
+  const byId = await prisma.portal.findFirst({ where: { id: idOrSlug, ownerId } });
+  if (byId) return byId;
+  return prisma.portal.findFirst({ where: { slug: idOrSlug, ownerId } });
+}
+
 paymentsRouter.post("/payment-methods", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const parsed = methodSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid body" } });
     return;
   }
-  if (/private\s*key|seed\s*phrase|mnemonic/i.test(parsed.data.handle)) {
+  if (looksLikeSecret(parsed.data.handle)) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Never store a private key or seed phrase" } });
+    return;
+  }
+  if (parsed.data.details && Object.values(parsed.data.details).some((v) => looksLikeSecret(v))) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Never store a private key or seed phrase" } });
+    return;
+  }
+  const formatError = handleFormatError(parsed.data.type, parsed.data.handle);
+  if (formatError) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: formatError } });
     return;
   }
   const method = await prisma.paymentMethod.create({
@@ -56,15 +130,50 @@ paymentsRouter.get("/payment-methods", authMiddleware, requireAdmin, async (req:
   res.json({ ok: true, data: { methods } });
 });
 
+paymentsRouter.get("/payment-methods/:id", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
+  const method = await prisma.paymentMethod.findFirst({ where: { id: req.params.id, ownerId: req.auth!.sub } });
+  if (!method) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Payment method not found" } });
+    return;
+  }
+  res.json({ ok: true, data: { method } });
+});
+
+paymentsRouter.delete("/payment-methods/:id", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
+  const method = await prisma.paymentMethod.findFirst({ where: { id: req.params.id, ownerId: req.auth!.sub } });
+  if (!method) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Payment method not found" } });
+    return;
+  }
+  try {
+    // Portal assignments cascade away (PortalPaymentMethod onDelete: Cascade).
+    await prisma.paymentMethod.delete({ where: { id: method.id } });
+  } catch (e) {
+    // A method already used by an invoice cannot be deleted outright.
+    const code = (e as { code?: string }).code;
+    if (code === "P2003") {
+      res.status(409).json({ ok: false, error: { code: "CONFLICT", message: "Payment method is used by an invoice" } });
+      return;
+    }
+    throw e;
+  }
+  res.json({ ok: true, data: { ok: true } });
+});
+
 // Assign / unassign a method to a portal (ADMIN).
 paymentsRouter.post("/portals/:portalId/methods", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
-  const { paymentMethodId } = z.object({ paymentMethodId: z.string().min(1) }).parse(req.body);
-  const portal = await prisma.portal.findFirst({ where: { id: req.params.portalId, ownerId: req.auth!.sub } });
-  const method = await prisma.paymentMethod.findFirst({ where: { id: paymentMethodId, ownerId: req.auth!.sub } });
+  const parsed = z.object({ paymentMethodId: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });
+    return;
+  }
+  const portal = await findOwnedPortal(req.auth!.sub, req.params.portalId);
+  const method = await prisma.paymentMethod.findFirst({ where: { id: parsed.data.paymentMethodId, ownerId: req.auth!.sub } });
   if (!portal || !method) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal or payment method not found" } });
     return;
   }
+  // Idempotent: assigning twice returns the same link, never a duplicate.
   const link = await prisma.portalPaymentMethod.upsert({
     where: { portalId_paymentMethodId: { portalId: portal.id, paymentMethodId: method.id } },
     update: {},
@@ -73,9 +182,15 @@ paymentsRouter.post("/portals/:portalId/methods", authMiddleware, requireAdmin, 
   res.status(201).json({ ok: true, data: { link } });
 });
 
-paymentsRouter.delete("/portals/:portalId/methods/:methodId", authMiddleware, requireAdmin, async (req, res) => {
+paymentsRouter.delete("/portals/:portalId/methods/:methodId", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
+  const portal = await findOwnedPortal(req.auth!.sub, req.params.portalId);
+  const method = await prisma.paymentMethod.findFirst({ where: { id: req.params.methodId, ownerId: req.auth!.sub } });
+  if (!portal || !method) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal or payment method not found" } });
+    return;
+  }
   await prisma.portalPaymentMethod.deleteMany({
-    where: { portalId: req.params.portalId, paymentMethodId: req.params.methodId },
+    where: { portalId: portal.id, paymentMethodId: method.id },
   });
   res.json({ ok: true, data: { ok: true } });
 });

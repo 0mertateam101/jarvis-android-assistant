@@ -35,10 +35,14 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+// paymentsRouter is mounted BEFORE portalsRouter on purpose: it owns the
+// PUBLIC Pay-page route GET /api/portals/:slug/public-methods, and the
+// portals router applies authMiddleware + requireAdmin to everything
+// under /api/portals. Mounted after it, the public route would 401.
+app.use("/api", paymentsRouter); // /api/payment-methods, /api/portals/:id/methods, /api/payments/:id/confirm
 app.use("/api/portals", portalsRouter);
 app.use("/api/access/login", loginLimiter);
 app.use("/api/access", accessRouter);
-app.use("/api", paymentsRouter); // /api/payment-methods, /api/portals/:id/methods, /api/payments/:id/confirm
 app.use("/api/invoices", invoicesRouter);
 app.use("/api/security/visit", visitLimiter);
 app.use("/api/security", securityRouter);
