@@ -279,7 +279,104 @@ Do not skip ahead — later prompts depend on earlier ones.
 
 ---
 
-## After all 12
+## Prompt 13 — Android APK build on GitHub Actions + portal click test (Playwright)
+
+> Two things that could never run on the local machine, both done on
+> GitHub Actions instead (same approach as the Docker check).
+>
+> **Part A — APK build.** New workflow `.github/workflows/apk-build.yml`
+> (runs on push to `apps/android/**` + `workflow_dispatch`):
+> ubuntu-latest, setup JDK 17 (Temurin), setup Android SDK, fetch
+> `gradle/wrapper/gradle-wrapper.jar` from the official Gradle 8.7 URL
+> and verify its SHA-256
+> `cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8` (the
+> jar cannot be committed through the text-only API tooling, so the
+> workflow fetches it — see `apps/android/README.md`), then
+> `./gradlew assembleDebug`. Upload the debug APK as an Actions artifact
+> (`jarvis-debug-apk`, `apps/android/app/build/outputs/apk/debug/app-debug.apk`,
+> 30-day retention) so Don can download it on his phone and install it.
+> Debug APK only — no release signing (no signing keys exist). Update
+> `apps/android/README.md` with the download steps.
+>
+> **Part B — Portal click test.** The React portal was never driven by
+> clicks in a real browser. Add a Playwright spec
+> `apps/portal/e2e/portal.spec.ts` + `apps/portal/playwright.config.ts`
+> (add `@playwright/test` as a devDependency) that runs against the portal
+> served by `vite preview` with `VITE_API_URL` pointing at the docker
+> server: log in with an invited customer's email + code, open the Pay
+> page, see the assigned methods, create an invoice, see the barcode/QR,
+> submit a reference and see it stay PENDING, open the receipt. One happy
+> path + one negative (wrong code → generic denial). The spec creates its
+> own portal/methods/invite through the API in `beforeAll` so it passes
+> standalone. Add a Playwright step to the EXISTING `docker-e2e.yml`
+> workflow (after the API e2e step, BEFORE the Stop stack step — the
+> compose stack must still be up): start `vite preview` on port 4173,
+> install Playwright chromium, run the spec, stop preview; add
+> `apps/portal/**` to the workflow's push paths.
+>
+> The workflow files cannot be pushed through the API (403, no workflow
+> scope) — write them locally; they are created/edited through the
+> GitHub web UI.
+
+**Touches:** `.github/workflows/apk-build.yml`, `.github/workflows/docker-e2e.yml`, `apps/portal/e2e/portal.spec.ts`, `apps/portal/playwright.config.ts`, `apps/portal/package.json`, `apps/portal/package-lock.json`, `apps/portal/tsconfig.json`, `apps/android/README.md`
+**Done when:** `apk-build.yml` exists on main and its first run is green with a downloadable `app-debug.apk` artifact; the Playwright spec passes in the docker-e2e run; `npx tsc --noEmit` clean in server/ and apps/portal; portal `npm run build` clean.
+
+---
+
+## Prompt 14 — ARCHIVED guards, admin invite, atomic invoice numbering, compose secrets
+
+> Finish the known gaps left open after Prompts 1–12.
+>
+> **1. ARCHIVED portal guards.** `POST /api/access/invite` to an ARCHIVED
+> portal currently succeeds (201) and the invitee only fails at login
+> with a 401 — reject with 409 `{ code: "PORTAL_ARCHIVED" }`.
+> `GET /api/portals/:slug/public-methods` still lists an ARCHIVED portal's
+> payment methods on its public Pay page — ARCHIVED portals must return
+> 404 on the public routes (same as a missing portal); apply the same to
+> the public asset-file route.
+>
+> **2. Admin invite.** `POST /api/auth/invite-admin` (ADMIN only) is a 501
+> placeholder — implement it: body `{ email, password (min 8), name? }`,
+> creates a second ADMIN user, 201 with the user and never the password
+> hash, no token returned (the new admin signs in via `/login`). Duplicate
+> email → 400, weak password → 400, non-admin → 403. This is the only way
+> a second admin is created — public registration stays blocked.
+>
+> **3. Atomic invoice numbering.** `nextInvoiceNumber()` is count+1001 —
+> two simultaneous creates can collide. Add a single-row counter model
+> (`InvoiceCounter`, id `"main"`, `nextNumber`) to BOTH Prisma schemas +
+> a migration for each (dual-schema rule), seeded from the existing
+> invoice count so a pre-counter DB keeps its sequence and a fresh DB
+> starts at JAR-1001; allocate with a transactional relative increment.
+>
+> **4. Compose secrets hardening.** `docker-compose.yml` bakes in
+> `POSTGRES_PASSWORD=jarvis_dev_only` (a weak, publicly known dev
+> password) and a `DATABASE_URL` default embedding it. The JWT_SECRET
+> default is already a placeholder (`change-me-in-env`) — leave it, do
+> NOT invent a real secret. Change compose to
+> `POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}` and
+> `DATABASE_URL=${DATABASE_URL:?set DATABASE_URL}` (fail fast when unset).
+> Update the compose header comment, `README.md`, and
+> `server/.env.example` with local run instructions. The docker-e2e
+> workflow relies on the old defaults, so write the exact YAML snippet
+> for the web UI: a step before `docker compose up` that generates random
+> values (`openssl rand -hex 32` for JWT_SECRET, `openssl rand -hex 16`
+> for POSTGRES_PASSWORD, DATABASE_URL built from the generated password)
+> and exports them to `$GITHUB_ENV`. The workflow edit must land BEFORE
+> the compose change is pushed, or the next docker run will fail.
+>
+> Update `docs/API.md`, `docs/ARCHITECTURE.md`, `README.md`. Extend the
+> existing test scripts (fresh test DB, absolute `DATABASE_URL`, real exit
+> code) and re-run `auth` / `access` / `payments` / `invoices` /
+> `security` / `id-captcha-assets` / `crypto` (SIMULATED) /
+> `portal-e2e` for regressions.
+
+**Touches:** `server/src/routes/access.ts`, `server/src/routes/assets.ts`, `server/src/routes/auth.ts`, `server/src/routes/payments.ts`, `server/src/services/invoice.ts`, `server/prisma/schema.prisma`, `server/prisma/postgres/schema.prisma`, `server/prisma/migrations/*`, `server/prisma/postgres/migrations/*`, `docker-compose.yml`, `README.md`, `server/.env.example`, `docs/API.md`, `docs/ARCHITECTURE.md`, `server/scripts/auth-test.sh`, `server/scripts/access-test.sh`, `server/scripts/payments-test.sh`, `server/scripts/invoices-test.sh`, `server/scripts/id-captcha-assets-test.sh`
+**Done when:** ARCHIVED invite 409 + ARCHIVED public routes 404; invite-admin 201 with no hash, duplicate/weak 400, non-admin 403; sequential invoices JAR-1001, JAR-1002, … and the sequence continues after a server restart; `grep -rn jarvis_dev_only` returns zero matches in the repo; `tsc` clean; all re-run test scripts pass; the docker-e2e workflow generates its own throwaway secrets and still passes.
+
+---
+
+## After all 14
 
 Run `docker compose up --build`, repeat Prompt 9's end-to-end flow, then
 ask Don for the first real portal name + its payment methods before

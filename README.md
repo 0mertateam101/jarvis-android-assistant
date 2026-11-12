@@ -107,12 +107,20 @@ optional Whisper hook in `VoiceInput.kt` is disabled unless
 ### 4. Docker (server + Postgres)
 
 ```bash
+# Secrets are NOT in the compose file — set them first (or put them in
+# a .env file in the repo root, which Compose reads for interpolation):
+export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+export DATABASE_URL="postgresql://jarvis:${POSTGRES_PASSWORD}@db:5432/jarvis?schema=public"
+export JWT_SECRET="$(openssl rand -hex 32)"
 docker compose up --build
 # server on :4000, postgres on :5432.
 ```
 
-The compose file passes a `postgresql://...` `DATABASE_URL` to the server
-itself — you do **not** need to set it in `server/.env` for Docker.
+Compose fails fast if `POSTGRES_PASSWORD` or `DATABASE_URL` is unset —
+that is on purpose, so a stack never starts on a known password. The
+`DATABASE_URL` you export is what the server container uses; you do
+**not** need to set it in `server/.env` for Docker (the container's
+environment wins over `.env`).
 
 **Dual-schema rule (important):** there are two Prisma schemas with
 identical models — `server/prisma/schema.prisma` (SQLite, local dev and

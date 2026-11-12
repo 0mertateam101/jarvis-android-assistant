@@ -187,6 +187,19 @@ NUM2=$(jget /tmp/p6-inv2.json "d.data.invoice.number")
 [ "$NUM2" = "JAR-1002" ] && echo "PASS: 7. invoice 2 number is JAR-1002" || { echo "FAIL: 7. invoice 2 number is '$NUM2'"; FAIL=$((FAIL+1)); }
 INV2_ID=$(jget /tmp/p6-inv2.json "d.data.invoice.id")
 
+# 7b. (Prompt 14) Create invoice 3 -> JAR-1003: the atomic counter
+#      allocates sequentially, no duplicates. Restart continuation is
+#      verified manually (see the header): stop the server, start it
+#      again on the SAME test DB, create one more invoice — it must be
+#      JAR-1004, because the counter lives in the DB, not memory.
+code=$(curl -s -o /tmp/p6-inv3.json -w "%{http_code}" -X POST "$BASE/api/invoices" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"portalSlug\":\"p6-portal-a\",\"payerEmail\":\"$CUSTA_EMAIL\",\"amount\":\"25.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"Coaching — January\",\"amount\":\"25.00\"}],\"paymentMethodId\":\"$METHOD_ID\"}")
+check "7b. create invoice 3 -> 201" 201 "$code"
+NUM3=$(jget /tmp/p6-inv3.json "d.data.invoice.number")
+[ "$NUM3" = "JAR-1003" ] && echo "PASS: 7b. invoice 3 number is JAR-1003" || { echo "FAIL: 7b. invoice 3 number is '$NUM3'"; FAIL=$((FAIL+1)); }
+INV3_ID=$(jget /tmp/p6-inv3.json "d.data.invoice.id")
+
 # 8. GET invoice as its customer -> 200; as another portal's customer -> 403; as ADMIN -> 200; unknown -> 404
 code=$(curl -s -o /tmp/p6-get-a.json -w "%{http_code}" "$BASE/api/invoices/$INV1_ID" \
   -H "Authorization: Bearer $CUSTA_TOKEN")
@@ -224,12 +237,12 @@ code=$(curl -s -o /tmp/p6-list.json -w "%{http_code}" "$BASE/api/portals/p6-port
   -H "Authorization: Bearer $ADMIN_TOKEN")
 check "10. canonical list GET /api/portals/p6-portal-a/invoices -> 200" 200 "$code"
 LIST_COUNT=$(node -e "console.log(require('/tmp/p6-list.json').data.invoices.length)" 2>/dev/null)
-[ "$LIST_COUNT" = "2" ] && echo "PASS: 10. canonical list has 2 invoices" || { echo "FAIL: 10. canonical list has '$LIST_COUNT'"; FAIL=$((FAIL+1)); }
+[ "$LIST_COUNT" = "3" ] && echo "PASS: 10. canonical list has 3 invoices" || { echo "FAIL: 10. canonical list has '$LIST_COUNT'"; FAIL=$((FAIL+1)); }
 code=$(curl -s -o /tmp/p6-list-alias.json -w "%{http_code}" "$BASE/api/invoices/portals/$PORTAL_A_ID/list" \
   -H "Authorization: Bearer $ADMIN_TOKEN")
 check "10. alias list GET /api/invoices/portals/:id/list -> 200" 200 "$code"
 ALIAS_COUNT=$(node -e "console.log(require('/tmp/p6-list-alias.json').data.invoices.length)" 2>/dev/null)
-[ "$ALIAS_COUNT" = "2" ] && echo "PASS: 10. alias list has 2 invoices" || { echo "FAIL: 10. alias list has '$ALIAS_COUNT'"; FAIL=$((FAIL+1)); }
+[ "$ALIAS_COUNT" = "3" ] && echo "PASS: 10. alias list has 3 invoices" || { echo "FAIL: 10. alias list has '$ALIAS_COUNT'"; FAIL=$((FAIL+1)); }
 code=$(curl -s -o /tmp/p6-list-404.json -w "%{http_code}" "$BASE/api/portals/no-such-portal/invoices" \
   -H "Authorization: Bearer $ADMIN_TOKEN")
 check "10. canonical list unknown portal -> 404" 404 "$code"
@@ -255,11 +268,25 @@ code=$(curl -s -o /tmp/p6-bad4.json -w "%{http_code}" -X POST "$BASE/api/invoice
   -d "{\"portalSlug\":\"p6-portal-a\",\"payerEmail\":\"$CUSTA_EMAIL\",\"amount\":\"150.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"X\",\"amount\":\"1.00\"}],\"paymentMethodId\":\"$METHOD2_ID\"}")
 check "11. unassigned method -> 400" 400 "$code"
 
-# 12. CUSTOMER create invoice -> 403
+# 12. (Prompt 14 — corrected) CUSTOMER create invoice: since Prompt 9 a
+#     customer MAY create an invoice for their OWN portal as THEMSELVES
+#     (-> 201, the old 403 expectation predates that fix and contradicts
+#     portal-e2e-test.sh case 8). The negatives still hold: creating as
+#     a different payer -> 403, and on another portal -> 403.
 code=$(curl -s -o /tmp/p6-cust-create.json -w "%{http_code}" -X POST "$BASE/api/invoices" \
   -H "Authorization: Bearer $CUSTA_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"portalSlug\":\"p6-portal-a\",\"payerEmail\":\"$CUSTA_EMAIL\",\"amount\":\"150.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"X\",\"amount\":\"1.00\"}],\"paymentMethodId\":\"$METHOD_ID\"}")
-check "12. CUSTOMER create invoice -> 403" 403 "$code"
+check "12. CUSTOMER create invoice, own portal as self -> 201" 201 "$code"
+NUMC=$(jget /tmp/p6-cust-create.json "d.data.invoice.number")
+[ "$NUMC" = "JAR-1004" ] && echo "PASS: 12. customer-created invoice number is JAR-1004 (counter continues)" || { echo "FAIL: 12. customer-created invoice number is '$NUMC', expected JAR-1004"; FAIL=$((FAIL+1)); }
+code=$(curl -s -o /tmp/p6-cust-create-other.json -w "%{http_code}" -X POST "$BASE/api/invoices" \
+  -H "Authorization: Bearer $CUSTA_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"portalSlug\":\"p6-portal-a\",\"payerEmail\":\"$CUSTB_EMAIL\",\"amount\":\"150.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"X\",\"amount\":\"1.00\"}],\"paymentMethodId\":\"$METHOD_ID\"}")
+check "12. CUSTOMER create invoice as another payer -> 403" 403 "$code"
+code=$(curl -s -o /tmp/p6-cust-create-b.json -w "%{http_code}" -X POST "$BASE/api/invoices" \
+  -H "Authorization: Bearer $CUSTB_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"portalSlug\":\"p6-portal-a\",\"payerEmail\":\"$CUSTB_EMAIL\",\"amount\":\"150.00\",\"currency\":\"USD\",\"items\":[{\"description\":\"X\",\"amount\":\"1.00\"}],\"paymentMethodId\":\"$METHOD_ID\"}")
+check "12. CUSTOMER B create invoice on portal A -> 403" 403 "$code"
 
 # 13. SENT mode only: the stub must have received the barcode mail
 if [ "${SMTP_TEST:-0}" = "1" ]; then

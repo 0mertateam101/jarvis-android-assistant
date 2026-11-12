@@ -134,6 +134,58 @@ code=$(curl -s -o /tmp/p2-methods-cust.json -w "%{http_code}" -X POST "$BASE/api
   -d '{"type":"CASH_APP","label":"Test","handle":"$TestOnly"}')
 check "12. (d) CUSTOMER POST /api/payment-methods -> 403" 403 "$code"
 
+# 13. (Prompt 14) invite-admin: ADMIN invites a second admin -> 201,
+#     role ADMIN, and the response must NOT contain a password hash.
+ADMIN2_EMAIL="prompt2-admin2@test.local"
+ADMIN2_PASS="SecondAdmin123!"
+code=$(curl -s -o /tmp/p2-invadmin.json -w "%{http_code}" -X POST "$BASE/api/auth/invite-admin" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN2_EMAIL\",\"password\":\"$ADMIN2_PASS\",\"name\":\"Second Admin\"}")
+check "13. ADMIN invite-admin -> 201" 201 "$code"
+ROLE2=$(jget /tmp/p2-invadmin.json "d.data.user.role")
+[ "$ROLE2" = "ADMIN" ] && echo "PASS: 13. invited user role is ADMIN" || { echo "FAIL: 13. invited user role is '$ROLE2'"; FAIL=$((FAIL+1)); }
+HAS_HASH=$(jget /tmp/p2-invadmin.json "('passwordHash' in d.data.user)")
+[ "$HAS_HASH" = "false" ] && echo "PASS: 13. invite-admin response has no passwordHash" || { echo "FAIL: 13. invite-admin response leaks passwordHash"; FAIL=$((FAIL+1)); }
+
+# 14. Second admin can log in and do admin work
+code=$(curl -s -o /tmp/p2-login2.json -w "%{http_code}" -X POST "$BASE/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN2_EMAIL\",\"password\":\"$ADMIN2_PASS\"}")
+check "14. second admin login -> 200" 200 "$code"
+ADMIN2_TOKEN=$(jget /tmp/p2-login2.json "d.data.token")
+echo "   second admin token: $(mask "$ADMIN2_TOKEN")"
+code=$(curl -s -o /tmp/p2-portals2.json -w "%{http_code}" "$BASE/api/portals" \
+  -H "Authorization: Bearer $ADMIN2_TOKEN")
+check "14. second admin GET /api/portals -> 200" 200 "$code"
+
+# 15. Duplicate email -> 400
+code=$(curl -s -o /tmp/p2-invdup.json -w "%{http_code}" -X POST "$BASE/api/auth/invite-admin" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN2_EMAIL\",\"password\":\"AnotherPass123!\"}")
+check "15. invite-admin duplicate email -> 400" 400 "$code"
+
+# 16. Weak password (7 chars, min is 8) -> 400
+code=$(curl -s -o /tmp/p2-invweak.json -w "%{http_code}" -X POST "$BASE/api/auth/invite-admin" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"email":"weak@test.local","password":"short7!"}')
+check "16. invite-admin weak password -> 400" 400 "$code"
+
+# 17. CUSTOMER token cannot invite an admin -> 403
+code=$(curl -s -o /tmp/p2-invcust.json -w "%{http_code}" -X POST "$BASE/api/auth/invite-admin" \
+  -H "Authorization: Bearer $CUST_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"email":"cust-admin@test.local","password":"CustAdmin123!"}')
+check "17. CUSTOMER invite-admin -> 403" 403 "$code"
+
+# 18. No token -> 401; public registration still blocked -> 403
+code=$(curl -s -o /tmp/p2-invnotok.json -w "%{http_code}" -X POST "$BASE/api/auth/invite-admin" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"notok@test.local","password":"NoTokAdmin123!"}')
+check "18. invite-admin, no token -> 401" 401 "$code"
+code=$(curl -s -o /tmp/p2-reg3.json -w "%{http_code}" -X POST "$BASE/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"third@test.local","password":"TestAdmin123!","name":"Third"}')
+check "18. register still blocked after invite-admin exists -> 403" 403 "$code"
+
 echo "== Summary: $FAIL failure(s) =="
 rm -f /tmp/p2-*.json
 [ "$FAIL" = 0 ] && echo "ALL PROMPT 2 AUTH CHECKS PASSED" || echo "SOME CHECKS FAILED"

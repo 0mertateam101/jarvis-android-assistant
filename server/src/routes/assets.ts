@@ -220,7 +220,9 @@ assetsRouter.delete("/portals/:portalId/assets/:id", authMiddleware, requireAdmi
 // download as an attachment.
 assetsRouter.get("/portals/:slug/assets/:id/file", async (req, res) => {
   const portal = await prisma.portal.findUnique({ where: { slug: req.params.slug } });
-  if (!portal) {
+  // Public route: an ARCHIVED portal is a 404, same as a missing one —
+  // its logo, banner, and documents stop being served when archived.
+  if (!portal || portal.status !== "ACTIVE") {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;
   }

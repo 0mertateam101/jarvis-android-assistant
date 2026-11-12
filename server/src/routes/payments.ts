@@ -225,7 +225,9 @@ paymentsRouter.get("/portals/:slug/public-methods", async (req, res) => {
     where: { slug: req.params.slug },
     include: { methods: { include: { paymentMethod: true } }, assets: true },
   });
-  if (!portal) {
+  // ARCHIVED portals are invisible on the public routes, exactly like a
+  // missing portal — no payment methods, branding, or documents leak.
+  if (!portal || portal.status !== "ACTIVE") {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;
   }

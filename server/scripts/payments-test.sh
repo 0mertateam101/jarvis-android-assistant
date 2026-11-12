@@ -269,6 +269,17 @@ code=$(curl -s -o /tmp/p5-notok.json -w "%{http_code}" -X POST "$BASE/api/paymen
   -d '{"type":"CASH_APP","label":"NoTok","handle":"$notok"}')
 check "14. create method, no token -> 401" 401 "$code"
 
+# 15. (Prompt 14) ARCHIVED portal is invisible on the public routes:
+#     archive portal B -> 200, its public-methods -> 404 (same as a
+#     missing portal), while portal A (still ACTIVE) still lists -> 200.
+code=$(curl -s -o /tmp/p5-archive-b.json -w "%{http_code}" -X DELETE "$BASE/api/portals/$PORTAL_B" \
+  -H "Authorization: Bearer $ADMIN_TOKEN")
+check "15. archive portal B -> 200" 200 "$code"
+code=$(curl -s -o /tmp/p5-pub-b-arch.json -w "%{http_code}" "$BASE/api/portals/$SLUG_B/public-methods")
+check "15. public-methods ARCHIVED portal B -> 404" 404 "$code"
+code=$(curl -s -o /tmp/p5-pub-a-still.json -w "%{http_code}" "$BASE/api/portals/$SLUG_A/public-methods")
+check "15. public-methods ACTIVE portal A still -> 200" 200 "$code"
+
 echo "== Summary: $FAIL failure(s) =="
 rm -f /tmp/p5-*.json
 [ "$FAIL" = 0 ] && echo "ALL PROMPT 5 PAYMENT CHECKS PASSED" || echo "SOME CHECKS FAILED"

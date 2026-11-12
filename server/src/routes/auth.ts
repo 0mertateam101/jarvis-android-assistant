@@ -22,6 +22,12 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+const inviteAdminSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().min(1).max(100).optional(),
+});
+
 function publicUser(u: { id: string; email: string; name: string | null; role: string }) {
   return { id: u.id, email: u.email, name: u.name, role: u.role };
 }
@@ -34,8 +40,9 @@ authRouter.post("/register", async (req, res) => {
   }
   const userCount = await prisma.user.count();
   if (userCount > 0) {
-    // After the first user, registration is admin-only (future invite flow).
-    // For now, block it outright so no stranger can self-register as ADMIN.
+    // After the first user, the only way to create another ADMIN is
+    // POST /api/auth/invite-admin with an ADMIN token. Public
+    // registration stays blocked so no stranger can self-register.
     res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Registration is closed — ask an admin" } });
     return;
   }
@@ -76,8 +83,24 @@ authRouter.get("/me", authMiddleware, async (req: AuthedRequest, res) => {
   res.json({ ok: true, data: { user: publicUser(user) } });
 });
 
-// Placeholder for a future admin-invite flow — intentionally not wired
-// until Don approves it. Kept behind requireAdmin so it cannot be abused.
-authRouter.post("/invite-admin", authMiddleware, requireAdmin, (_req, res) => {
-  res.status(501).json({ ok: false, error: { code: "INTERNAL", message: "Admin invite is not enabled yet" } });
+// Admin invite — the ONLY way a second ADMIN is created (Prompt 14).
+// ADMIN-only (authMiddleware + requireAdmin). The new admin signs in
+// with /login themselves, so no token is returned here, and the
+// password hash is never returned. Public registration stays blocked.
+authRouter.post("/invite-admin", authMiddleware, requireAdmin, async (req, res) => {
+  const parsed = inviteAdminSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid body" } });
+    return;
+  }
+  const email = parsed.data.email.toLowerCase();
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Email already registered" } });
+    return;
+  }
+  const user = await prisma.user.create({
+    data: { email, passwordHash: await bcrypt.hash(parsed.data.password, 12), name: parsed.data.name ?? null, role: "ADMIN" },
+  });
+  res.status(201).json({ ok: true, data: { user: publicUser(user) } });
 });

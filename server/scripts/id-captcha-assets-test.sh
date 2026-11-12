@@ -516,6 +516,18 @@ if [ -f "$LOG_FILE" ]; then
   else echo "FAIL: 48. no receipt email for JAR-1001 in server log ($LOG_FILE)"; FAIL=$((FAIL+1)); fi
 else echo "FAIL: 48. server log not found at $LOG_FILE — start the server with output there"; FAIL=$((FAIL+1)); fi
 
+# 49. (Prompt 14) ARCHIVED portal stops serving public files: archive
+#     portal A -> 200, its public-methods -> 404, and the BANNER file
+#     that was public before -> 404. (Last check: nothing after this
+#     needs portal A ACTIVE.)
+code=$(curl -s -o /tmp/p12-archive-a.json -w "%{http_code}" -X DELETE "$BASE/api/portals/$PORTAL_A_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN")
+check "49. archive portal A -> 200" 200 "$code"
+code=$(curl -s -o /tmp/p12-public-arch.json -w "%{http_code}" "$BASE/api/portals/p12-portal-a/public-methods")
+check "49. public-methods ARCHIVED portal A -> 404" 404 "$code"
+code=$(curl -s -o /tmp/p12-banner-arch.json -w "%{http_code}" "$BASE/api/portals/p12-portal-a/assets/$BANNER_ID/file")
+check "49. BANNER file of ARCHIVED portal A -> 404" 404 "$code"
+
 echo "== Summary: $FAIL failure(s) =="
 [ "$FAIL" = 0 ] && echo "ALL PROMPT 12 ID + CAPTCHA + ASSETS CHECKS PASSED" || echo "SOME CHECKS FAILED"
 exit "$FAIL"

@@ -211,6 +211,24 @@ code=$(curl -s -o /tmp/p4-cust-invite.json -w "%{http_code}" -X POST "$BASE/api/
   -d "{\"portalId\":\"$PORTAL_ID\",\"email\":\"other@test.local\"}")
 check "10. CUSTOMER invite -> 403" 403 "$code"
 
+# 10b. (Prompt 14) Invite to an ARCHIVED portal -> 409, not 201: the
+#      invitee would only fail at login otherwise. Archive a fresh
+#      portal C so portal A stays usable for the checks below.
+code=$(curl -s -o /tmp/p4-portal-c.json -w "%{http_code}" -X POST "$BASE/api/portals" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Prompt Four Archived Portal","slug":"p4-portal-c","currency":"USD"}')
+check "10b. create portal C -> 201" 201 "$code"
+PORTAL_C_ID=$(jget /tmp/p4-portal-c.json "d.data.portal.id")
+code=$(curl -s -o /tmp/p4-archive-c.json -w "%{http_code}" -X DELETE "$BASE/api/portals/$PORTAL_C_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN")
+check "10b. archive portal C -> 200" 200 "$code"
+code=$(curl -s -o /tmp/p4-invite-arch.json -w "%{http_code}" -X POST "$BASE/api/access/invite" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"portalId\":\"$PORTAL_C_ID\",\"email\":\"archived@test.local\"}")
+check "10b. invite to ARCHIVED portal -> 409" 409 "$code"
+ARCH_ERR=$(jget /tmp/p4-invite-arch.json "d.error.code")
+[ "$ARCH_ERR" = "PORTAL_ARCHIVED" ] && echo "PASS: 10b. archived-invite error code is PORTAL_ARCHIVED" || { echo "FAIL: 10b. archived-invite error code is '$ARCH_ERR'"; FAIL=$((FAIL+1)); }
+
 # 11. DB holds ONLY the hash: query the test DB directly, and grep the raw
 #     DB file + server log for every plain code issued — no match allowed.
 #     Absolute DATABASE_URL (see header) so this reads the same file the

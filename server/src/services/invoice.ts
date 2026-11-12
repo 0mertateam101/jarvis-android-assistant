@@ -3,12 +3,32 @@ import { prisma } from "../db";
 import { proofHash } from "../utils/codes";
 
 // Invoice numbering: JAR-1001, JAR-1002, … (sequential, never reused).
-// Dev implementation: count + 1001 inside a transaction. Safe for a
-// single-instance server. For multi-instance prod, replace with a DB
-// sequence / locked counter row (see Copilot Prompt 6).
+// Atomic implementation (Prompt 14): a single-row InvoiceCounter
+// (id "main") holds the NEXT number to allocate. Allocation increments
+// it inside a transaction, so two simultaneous invoice creates can
+// never collide — the old count+1001 read could. The increment is a
+// relative `nextNumber + 1`, so concurrent transactions serialize on
+// the row and each gets a distinct number (Postgres row lock; SQLite
+// serializes writers). The counter row is seeded by the migration from
+// the existing invoice count, so a DB created before the counter keeps
+// its sequence; a fresh DB starts at JAR-1001. The create branch below
+// is only a fallback for a DB built without the migration.
 export async function nextInvoiceNumber(): Promise<string> {
-  const count = await prisma.invoice.count();
-  return `JAR-${1001 + count}`;
+  const allocated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.invoiceCounter.findUnique({ where: { id: "main" } });
+    if (existing) {
+      const updated = await tx.invoiceCounter.update({
+        where: { id: "main" },
+        data: { nextNumber: { increment: 1 } },
+      });
+      return updated.nextNumber - 1;
+    }
+    const count = await tx.invoice.count();
+    const first = 1001 + count;
+    await tx.invoiceCounter.create({ data: { id: "main", nextNumber: first + 1 } });
+    return first;
+  });
+  return `JAR-${allocated}`;
 }
 
 export interface ReceiptData {

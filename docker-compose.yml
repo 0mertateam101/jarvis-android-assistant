@@ -1,6 +1,16 @@
 # JARVIS — server + Postgres (dev / staging)
-# Usage: cp server/.env.example server/.env, set DATABASE_URL to the
-# postgres URL below, then: docker compose up --build
+#
+# Secrets are NOT baked into this file. Before starting, set them in
+# your shell (or in a .env file in THIS directory — Compose reads it
+# automatically for interpolation):
+#   export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+#   export DATABASE_URL="postgresql://jarvis:${POSTGRES_PASSWORD}@db:5432/jarvis?schema=public"
+#   export JWT_SECRET="$(openssl rand -hex 32)"
+# Then: docker compose up --build
+# Compose fails fast with a clear error if POSTGRES_PASSWORD or
+# DATABASE_URL is unset — that is on purpose, so a stack never starts
+# on a known or placeholder password. JWT_SECRET still falls back to
+# the placeholder below; set a real one before any real deployment.
 # The portal (apps/portal) and Android app are NOT in this compose file;
 # run those locally (see README.md).
 services:
@@ -13,9 +23,10 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4000
-      # DATABASE_URL is read from server/.env at build/run time by Prisma.
-      # In compose, override it here if you do not use a .env file:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://jarvis:jarvis_dev_only@db:5432/jarvis?schema=public}
+      # DATABASE_URL and POSTGRES_PASSWORD come from the environment
+      # (see the header comment) — there is no default here on purpose.
+      # Compose aborts with a clear error if either is unset.
+      - DATABASE_URL=${DATABASE_URL:?set DATABASE_URL}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-env}
     ports:
       - "4000:4000"
@@ -31,7 +42,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=jarvis
-      - POSTGRES_PASSWORD=jarvis_dev_only
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       - POSTGRES_DB=jarvis
     ports:
       - "5432:5432"

@@ -169,13 +169,20 @@ Payment {
   simulated (Boolean — true unless a real provider confirmed it),
   proofHash, createdAt
 }
+InvoiceCounter {
+  id ("main" — the single row), nextNumber (Int — the NEXT number to
+  allocate), updatedAt
+}
 ```
 
-Invoice numbering: a DB counter / serial per server (see `invoice.ts`
-`nextInvoiceNumber()` — in prod use a DB sequence or a locked counter row;
-the current implementation uses `count + 1001` inside a transaction and is
-documented as safe for single-instance dev, to be replaced by a sequence
-for multi-instance prod — Copilot Prompt 6).
+Invoice numbering: a single-row `InvoiceCounter` (id `"main"`,
+`nextNumber`) in the DB — see `invoice.ts` `nextInvoiceNumber()`.
+Allocation increments the counter inside a transaction, so two
+simultaneous invoice creates can never collide (the old `count + 1001`
+read could). Fresh DBs start at `JAR-1001`; the migration seeds the
+row from the existing invoice count, so a DB created before the counter
+keeps its sequence. The counter lives in the DB, not memory, so the
+sequence survives a server restart.
 
 **Proof of payment:** `proofHash = sha256(invoiceNumber + "|" + amount +
 "|" + currency + "|" + reference + "|" + paidAtISO)`. It is printed on the

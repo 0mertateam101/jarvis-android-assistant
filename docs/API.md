@@ -28,8 +28,17 @@ No auth. Returns `{ ok: true, data: { status: "ok", time: "<ISO>" } }`.
 ### `POST /api/auth/register`
 Body: `{ "email": "don@example.com", "password": "…", "name": "Don" }`
 - First user ever registered becomes `ADMIN`. Later registrations return
-  `403` unless called with an ADMIN token (future admin-invite flow).
+  `403` — the only way to create a second admin is `POST
+  /api/auth/invite-admin` below. Public registration stays blocked.
 - Response `201`: `{ user: { id, email, name, role }, token }`
+
+### `POST /api/auth/invite-admin` — ADMIN
+Body: `{ "email": "second-admin@example.com", "password": "…", "name": "…" }`
+(password min 8 chars). Creates a second `ADMIN` user. No token is
+returned — the new admin signs in with `POST /api/auth/login`.
+- Response `201`: `{ user: { id, email, name, role: "ADMIN" } }` — the
+  password hash is never returned. Duplicate email → `400`; weak
+  password → `400`; non-admin → `403`; no token → `401`.
 
 ### `POST /api/auth/login`
 Body: `{ "email": "…", "password": "…" }`
@@ -93,6 +102,9 @@ Body: `{ "portalId": "…", "email": "customer@example.com" }`
   "warning": "Show this code once. It is not stored in plain text." }
 ```
 - Re-inviting an `ACTIVE` email rotates the code (old code stops working).
+- Inviting to an `ARCHIVED` portal → `409 { code: "PORTAL_ARCHIVED" }` —
+  an invitee would only fail at login otherwise, so the invite is
+  refused up front with a clear message.
 
 ### `GET /api/access/portals/:portalId/grants` — ADMIN
 Lists grants for a portal (emails + status + `lastUsedAt`; **never** codes).
@@ -165,7 +177,9 @@ method (or one Don does not own) → `404`. Response `200`: `{ ok: true }`.
 
 ### `GET /api/portals/:slug/public-methods` — public / customer
 Lists only the methods assigned to that portal (label, type, handle).
-Used by the portal Pay page. No admin data is exposed. The response
+Used by the portal Pay page. No admin data is exposed. An `ARCHIVED`
+portal returns `404`, exactly like a missing portal — its methods,
+branding, and documents stop being listed. The response
 also carries the portal's branding for the customer portal to render:
 `logoAssetId` / `bannerAssetId` (null when not set) and `documents`
 (`[{ id, kind, originalName, mimeType, size }]`) with download links
@@ -434,6 +448,7 @@ Deletes the record **and** the file. Response `200`: `{ ok: true }`.
 ### `GET /api/portals/:slug/assets/:id/file` — public
 Streams the file. Images are `inline` (the portal renders logo/banner);
 documents are `attachment` downloads. Unknown portal or asset → `404`.
+An `ARCHIVED` portal → `404` as well — its files stop being served.
 
 ---
 

@@ -45,6 +45,12 @@ accessRouter.post("/invite", authMiddleware, requireAdmin, async (req: AuthedReq
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
     return;
   }
+  // ARCHIVED portals take no new invites — the invitee would only fail
+  // at login with a 401. Reject here with a clear 409 instead.
+  if (portal.status !== "ACTIVE") {
+    res.status(409).json({ ok: false, error: { code: "PORTAL_ARCHIVED", message: "Portal is archived — invites are disabled" } });
+    return;
+  }
   const email = parsed.data.email.toLowerCase();
   if (await isBlocked(portal.id, email)) {
     res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });

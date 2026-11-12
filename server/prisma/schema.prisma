@@ -223,3 +223,16 @@ model PortalAsset {
 
   @@index([portalId])
 }
+
+// Atomic invoice numbering (Prompt 14) — single-row counter.
+// One row (id "main") holds the NEXT number to allocate; allocation
+// increments it inside a transaction (see services/invoice.ts
+// nextInvoiceNumber), so two simultaneous invoice creates can never
+// collide. Fresh DBs start at JAR-1001; the migration seeds the row
+// from the existing invoice count, so a DB created before the counter
+// keeps its numbering sequence.
+model InvoiceCounter {
+  id         String   @id
+  nextNumber Int
+  updatedAt  DateTime @updatedAt
+}
