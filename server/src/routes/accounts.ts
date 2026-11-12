@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
-import { authMiddleware } from "../middleware/auth";
+import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 
 // Linked accounts — "link all necessary information on my app for all
@@ -19,7 +19,7 @@ const createSchema = z.object({
 
 accountsRouter.use(authMiddleware, requireAdmin);
 
-accountsRouter.post("/portals/:portalId/accounts", async (req, res) => {
+accountsRouter.post("/portals/:portalId/accounts", async (req: AuthedRequest, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });

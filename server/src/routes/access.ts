@@ -33,7 +33,7 @@ async function isBlocked(portalId: string, email: string): Promise<boolean> {
   return Boolean(blocked);
 }
 
-accessRouter.post("/invite", authMiddleware, requireAdmin, async (req, res) => {
+accessRouter.post("/invite", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const parsed = inviteSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });

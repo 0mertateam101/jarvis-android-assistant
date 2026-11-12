@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
-import { authMiddleware } from "../middleware/auth";
+import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { getCryptoService, isCryptoType } from "../services/crypto";
 import { buildProofHash } from "../services/invoice";
@@ -31,7 +31,7 @@ const confirmSchema = z.object({
 });
 
 // --- Payment methods (ADMIN) ---
-paymentsRouter.post("/payment-methods", authMiddleware, requireAdmin, async (req, res) => {
+paymentsRouter.post("/payment-methods", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const parsed = methodSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid body" } });
@@ -51,13 +51,13 @@ paymentsRouter.post("/payment-methods", authMiddleware, requireAdmin, async (req
   res.status(201).json({ ok: true, data: { method } });
 });
 
-paymentsRouter.get("/payment-methods", authMiddleware, requireAdmin, async (req, res) => {
+paymentsRouter.get("/payment-methods", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const methods = await prisma.paymentMethod.findMany({ where: { ownerId: req.auth!.sub }, orderBy: { createdAt: "desc" } });
   res.json({ ok: true, data: { methods } });
 });
 
 // Assign / unassign a method to a portal (ADMIN).
-paymentsRouter.post("/portals/:portalId/methods", authMiddleware, requireAdmin, async (req, res) => {
+paymentsRouter.post("/portals/:portalId/methods", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const { paymentMethodId } = z.object({ paymentMethodId: z.string().min(1) }).parse(req.body);
   const portal = await prisma.portal.findFirst({ where: { id: req.params.portalId, ownerId: req.auth!.sub } });
   const method = await prisma.paymentMethod.findFirst({ where: { id: paymentMethodId, ownerId: req.auth!.sub } });
@@ -100,7 +100,7 @@ paymentsRouter.get("/portals/:slug/public-methods", async (req, res) => {
 });
 
 // --- Payment confirmation ---
-paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req, res) => {
+paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: AuthedRequest, res) => {
   const parsed = confirmSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });

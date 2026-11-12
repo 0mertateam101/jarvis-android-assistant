@@ -9,63 +9,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  ADMIN
-  CUSTOMER
-}
-
-enum PortalStatus {
-  ACTIVE
-  ARCHIVED
-}
-
-enum GrantStatus {
-  ACTIVE
-  REVOKED
-  TERMINATED
-}
-
-enum PaymentMethodType {
-  CASH_APP
-  VENMO
-  ZELLE
-  CHIME
-  PAYPAL
-  CARD
-  BANK
-  BTC
-  LTC
-  XMR
-  ETH
-}
-
-enum InvoiceStatus {
-  PENDING
-  PAID
-  FAILED
-  REFUNDED
-  CANCELLED
-}
-
-enum EmailStatus {
-  QUEUED
-  SENT
-  SIMULATED
-  FAILED
-}
-
-enum PaymentStatus {
-  PENDING
-  CONFIRMED
-  FAILED
-}
+// NOTE: SQLite has no native enums, so statuses / types are stored as
+// plain strings (e.g. "ACTIVE", "TERMINATED"). The API contract is unchanged:
+// routes validate them with zod and compare string literals only.
 
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
   passwordHash String
   name         String?
-  role         Role     @default(CUSTOMER)
+  role         String   @default("CUSTOMER")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -80,7 +33,7 @@ model Portal {
   name        String
   description String?
   currency    String       @default("USD")
-  status      PortalStatus @default(ACTIVE)
+  status      String       @default("ACTIVE")
   ownerId     String
   owner       User         @relation(fields: [ownerId], references: [id])
   createdAt   DateTime     @default(now())
@@ -100,7 +53,7 @@ model AccessGrant {
   portal     Portal      @relation(fields: [portalId], references: [id], onDelete: Cascade)
   email      String
   codeHash   String
-  status     GrantStatus @default(ACTIVE)
+  status     String      @default("ACTIVE")
   lastUsedAt DateTime?
   expiresAt  DateTime?
   createdAt  DateTime    @default(now())
@@ -111,7 +64,7 @@ model AccessGrant {
 
 model PaymentMethod {
   id        String            @id @default(cuid())
-  type      PaymentMethodType
+  type      String
   label     String
   // Public handle / URL / crypto address only — NEVER a secret or private key.
   handle    String
@@ -144,10 +97,10 @@ model Invoice {
   payerName        String?
   amount           Decimal
   currency         String        @default("USD")
-  status           InvoiceStatus @default(PENDING)
+  status           String        @default("PENDING")
   barcodePayload   String // JARVIS|<number>|<amount>|<currency>
   barcodeQrDataUrl String?
-  emailStatus      EmailStatus   @default(SIMULATED)
+  emailStatus      String        @default("SIMULATED")
   proofHash        String?
   items            String // JSON: [{ description, amount }]
   paymentMethodId  String?
@@ -166,7 +119,7 @@ model Payment {
   amount     Decimal
   currency   String        @default("USD")
   reference  String? // txHash / Stripe payment_intent / provider ref
-  status     PaymentStatus @default(PENDING)
+  status     String        @default("PENDING")
   simulated  Boolean       @default(true)
   proofHash  String?
   createdAt  DateTime      @default(now())

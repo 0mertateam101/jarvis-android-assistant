@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
-import { authMiddleware } from "../middleware/auth";
+import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 
 // Portals — one custom website / payment portal each.
@@ -35,7 +35,7 @@ function slugify(name: string): string {
 
 portalsRouter.use(authMiddleware, requireAdmin);
 
-portalsRouter.post("/", async (req, res) => {
+portalsRouter.post("/", async (req: AuthedRequest, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid body" } });
@@ -53,7 +53,7 @@ portalsRouter.post("/", async (req, res) => {
   res.status(201).json({ ok: true, data: { portal } });
 });
 
-portalsRouter.get("/", async (req, res) => {
+portalsRouter.get("/", async (req: AuthedRequest, res) => {
   const portals = await prisma.portal.findMany({
     where: { ownerId: req.auth!.sub },
     orderBy: { createdAt: "desc" },
@@ -61,7 +61,7 @@ portalsRouter.get("/", async (req, res) => {
   res.json({ ok: true, data: { portals } });
 });
 
-portalsRouter.get("/:id", async (req, res) => {
+portalsRouter.get("/:id", async (req: AuthedRequest, res) => {
   const portal = await prisma.portal.findFirst({
     where: { id: req.params.id, ownerId: req.auth!.sub },
     include: { accounts: true, methods: { include: { paymentMethod: true } } },
@@ -73,7 +73,7 @@ portalsRouter.get("/:id", async (req, res) => {
   res.json({ ok: true, data: { portal } });
 });
 
-portalsRouter.patch("/:id", async (req, res) => {
+portalsRouter.patch("/:id", async (req: AuthedRequest, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });
@@ -88,7 +88,7 @@ portalsRouter.patch("/:id", async (req, res) => {
   res.json({ ok: true, data: { portal: updated } });
 });
 
-portalsRouter.delete("/:id", async (req, res) => {
+portalsRouter.delete("/:id", async (req: AuthedRequest, res) => {
   // Archive, never hard-delete — invoices and traffic logs must survive.
   const portal = await prisma.portal.findFirst({ where: { id: req.params.id, ownerId: req.auth!.sub } });
   if (!portal) {

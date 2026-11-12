@@ -22,7 +22,7 @@ function getSecret(): string {
   return secret;
 }
 
-export function signToken(payload: AuthPayload, expiresIn = "7d"): string {
+export function signToken(payload: AuthPayload, expiresIn: jwt.SignOptions["expiresIn"] = "7d"): string {
   return jwt.sign(payload, getSecret(), { expiresIn });
 }
 

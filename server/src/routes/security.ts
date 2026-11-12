@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
-import { authMiddleware } from "../middleware/auth";
+import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { reverseLookup } from "../services/ipLookup";
 
@@ -84,7 +84,7 @@ securityRouter.get("/portals/:portalId/traffic", authMiddleware, requireAdmin, a
   res.json({ ok: true, data: { logs } });
 });
 
-securityRouter.post("/block", authMiddleware, requireAdmin, async (req, res) => {
+securityRouter.post("/block", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const parsed = blockSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });
