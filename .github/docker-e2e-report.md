@@ -1,8 +1,8 @@
 # Docker end-to-end check — report
 
-Run: https://github.com/0mertateam101/jarvis-android-assistant/actions/runs/43231374893
-Commit: aad75dc067d6b62a5e1d8033647bd9a8c34179d0
-Date (UTC): 2026-11-12T13:53:19Z
+Run: https://github.com/0mertateam101/jarvis-android-assistant/actions/runs/43239457460
+Commit: 63ccf4412acc15ad94cf841f4aa1872350674f5a
+Date (UTC): 2026-11-12T14:40:53Z
 
 **Result: PASS — all Docker e2e checks passed.**
 
@@ -46,7 +46,7 @@ PASS: 16. customer A reads receipt (HTTP 200)
 PASS: 16. receipt shows JAR-1001 PAID with proofHash
 PASS: 17. customer A downloads PDF -> 200 (HTTP 200)
 PASS: 17. PDF content-type is application/pdf
-PASS: 17. PDF is 1885 bytes
+PASS: 17. PDF is 1886 bytes
 PASS: 17. PDF without token -> 401 (HTTP 401)
 PASS: 17. PDF for other portal's customer -> 403 (HTTP 403)
 PASS: 18. block customer A (HTTP 201)
