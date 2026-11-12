@@ -1,8 +1,8 @@
 # Docker end-to-end check — report
 
-Run: https://github.com/0mertateam101/jarvis-android-assistant/actions/runs/43263868458
-Commit: 72edc55f882ea561b137856e697ec5198db01e1c
-Date (UTC): 2026-11-12T16:57:19Z
+Run: https://github.com/0mertateam101/jarvis-android-assistant/actions/runs/43271039730
+Commit: 6db07e8e18994ff5d9bdb0e19f21a9706e7dc1bc
+Date (UTC): 2026-11-12T17:37:42Z
 
 **Result: PASS — all Docker e2e checks passed.**
 **Playwright portal click test: FAIL — exit code 1. See the run log.**
@@ -47,7 +47,7 @@ PASS: 16. customer A reads receipt (HTTP 200)
 PASS: 16. receipt shows JAR-1001 PAID with proofHash
 PASS: 17. customer A downloads PDF -> 200 (HTTP 200)
 PASS: 17. PDF content-type is application/pdf
-PASS: 17. PDF is 1884 bytes
+PASS: 17. PDF is 1881 bytes
 PASS: 17. PDF without token -> 401 (HTTP 401)
 PASS: 17. PDF for other portal's customer -> 403 (HTTP 403)
 PASS: 18. block customer A (HTTP 201)
@@ -65,6 +65,9 @@ PASS: 20. bundle points at the docker server API (http://localhost:4000)
 PASS: 20. built bundle has zero localStorage uses (sessionStorage only)
 PASS: 20. built bundle uses sessionStorage (6 hits)
 PASS: 20. preview server stopped
+PASS: 21. CORS allows the portal preview origin (http://localhost:4173)
+PASS: 21. CORS preflight for the login call is allowed from the preview origin
+PASS: 21. CORS does not allow an unrelated origin (https://evil.example.com)
 == Summary: 0 failure(s) ==
 ALL DOCKER E2E CHECKS PASSED
 ```
