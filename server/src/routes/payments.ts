@@ -3,8 +3,9 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
-import { getCryptoService, isCryptoType } from "../services/crypto";
+import { cryptoMode, cryptoReferenceError, getCryptoService, isCryptoType, verifyWebhookSignature } from "../services/crypto";
 import { buildProofHash } from "../services/invoice";
+import { sendReceiptEmail } from "./invoices";
 
 // Payment methods (ADMIN) + assignment to portals + payment confirmation.
 // `handle` is a public handle / address only — never a secret or private key.
@@ -215,10 +216,22 @@ paymentsRouter.get("/portals/:slug/public-methods", async (req, res) => {
 });
 
 // --- Payment confirmation ---
+// HARD RULE (Prompt 7): an invoice is NEVER marked PAID on a QR/barcode
+// scan alone, and never on a customer-submitted txHash/reference alone.
+// PAID needs a confirmation record: a provider webhook, an on-chain /
+// provider verification, or Don's manual confirm — and Don's manual
+// confirm only works in SIMULATED mode. With a real provider configured,
+// manual confirm is refused and only the webhook can flip PAID.
 paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: AuthedRequest, res) => {
   const parsed = confirmSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invalid body" } });
+    return;
+  }
+  // Don's manual confirm is an ADMIN-only action. A customer trying to
+  // self-confirm is forbidden — the flag is never silently ignored.
+  if (parsed.data.adminConfirm === true && req.auth!.role !== "ADMIN") {
+    res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Only Don can manually confirm payments" } });
     return;
   }
   const invoice = await prisma.invoice.findUnique({
@@ -244,11 +257,43 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
   let note = "";
 
   if (methodType && isCryptoType(methodType)) {
-    const service = getCryptoService();
-    const result = await service.verify({ currency: methodType, reference: invoice.number, txHash: parsed.data.reference });
-    confirmed = result.confirmed;
-    simulated = result.simulated;
-    note = result.note;
+    // Crypto: the submitted reference is a txHash / provider reference.
+    // Validate its shape before it is ever stored.
+    const refError = cryptoReferenceError(parsed.data.reference);
+    if (refError) {
+      res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: refError } });
+      return;
+    }
+    if (parsed.data.adminConfirm === true && req.auth!.role === "ADMIN") {
+      if (cryptoMode() === "provider") {
+        // With a real provider configured, only the provider webhook /
+        // on-chain check can confirm. Don's manual confirm is refused.
+        res.status(400).json({
+          ok: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Manual confirm is disabled when a crypto provider is configured — confirmation must come from the provider webhook or an on-chain check",
+          },
+        });
+        return;
+      }
+      // SIMULATED mode: Don's manual confirm is the confirmation. It is
+      // explicitly labelled simulated — no on-chain or provider check ran.
+      confirmed = true;
+      simulated = true;
+      note = "Confirmed manually by Don in the Jarvis app (SIMULATED — no on-chain or provider verification was performed).";
+    } else {
+      // A customer-submitted txHash alone NEVER confirms. verify() is the
+      // only other path, and in SIMULATED mode it always returns
+      // confirmed=false — Don must confirm manually. In provider mode the
+      // (still unimplemented) provider check is the only path, and the
+      // webhook is what actually flips PAID.
+      const service = getCryptoService();
+      const result = await service.verify({ currency: methodType, reference: invoice.number, txHash: parsed.data.reference });
+      confirmed = result.confirmed;
+      simulated = result.simulated;
+      note = result.note;
+    }
   } else if (req.auth!.role === "ADMIN" && parsed.data.adminConfirm) {
     // Don's manual confirm in the app (dev / simulated mode, or after he
     // has verified a wallet/bank payment out-of-band).
@@ -257,7 +302,7 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
     note = "Confirmed manually by Don in the Jarvis app (simulated).";
   } else {
     // Fiat/wallet reference submitted by the customer: record it, but do
-    // NOT mark PAID. Don (or a Stripe webhook — Prompt 7) confirms.
+    // NOT mark PAID. Don (or a Stripe webhook) confirms.
     note = "Reference recorded. Awaiting confirmation — invoice stays PENDING until Don or the payment provider confirms.";
   }
 
@@ -285,5 +330,110 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
     data: { status: "PAID", paidAt, proofHash: proof },
   });
   await prisma.payment.update({ where: { id: payment.id }, data: { proofHash: proof } });
+  // Receipt email (queued or SIMULATED) now that the invoice is PAID.
+  await sendReceiptEmail(invoice.id);
   res.json({ ok: true, data: { invoice: updated, payment: { ...payment, proofHash: proof }, note } });
+});
+
+// --- Crypto provider webhook (BTCPay / Coinbase Commerce) ---
+// INTEGRATION POINT — the production path to PAID for crypto invoices.
+// Point the provider at POST /api/webhooks/crypto/:provider with the
+// webhook secret configured (BTCPAY_WEBHOOK_SECRET /
+// COINBASE_WEBHOOK_SECRET — see .env.example). The request is
+// authenticated by HMAC-SHA256 over the raw body (BTCPay-Sig /
+// X-CC-Webhook-Signature header). No auth JWT is needed — the signature
+// IS the auth, and a missing/invalid signature is a 401.
+//
+// Body contract (both providers are normalised to this shape):
+//   { "reference": "<invoice number, e.g. JAR-1001>",
+//     "txHash": "<transaction hash, optional>",
+//     "status": "confirmed" | "settled" | "complete" | "paid" }
+// Coinbase charge events are also accepted: { "event": { "type":
+// "charge:confirmed", "data": { "metadata": { "reference": "JAR-1001" } } } }.
+// A valid signature with a non-confirmation event (e.g. charge created)
+// is acknowledged with { ignored: true } and changes nothing.
+paymentsRouter.post("/webhooks/crypto/:provider", async (req, res) => {
+  const provider = req.params.provider;
+  if (provider !== "btcpay" && provider !== "coinbase") {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Unknown provider" } });
+    return;
+  }
+  const secret = provider === "btcpay" ? process.env.BTCPAY_WEBHOOK_SECRET : process.env.COINBASE_WEBHOOK_SECRET;
+  if (!secret) {
+    res.status(501).json({ ok: false, error: { code: "WEBHOOK_NOT_CONFIGURED", message: "Crypto webhook secret is not configured for this provider" } });
+    return;
+  }
+  const signatureHeader = provider === "btcpay" ? req.headers["btcpay-sig"] : req.headers["x-cc-webhook-signature"];
+  const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
+  if (!verifyWebhookSignature(secret, rawBody, typeof signatureHeader === "string" ? signatureHeader : undefined)) {
+    res.status(401).json({ ok: false, error: { code: "UNAUTHORIZED", message: "Invalid webhook signature" } });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const nestedMeta = (body.data as Record<string, unknown> | undefined)?.metadata as Record<string, unknown> | undefined;
+  const reference =
+    (typeof body.reference === "string" && body.reference) ||
+    (typeof (body.metadata as Record<string, unknown> | undefined)?.reference === "string" &&
+      ((body.metadata as Record<string, unknown>).reference as string)) ||
+    (typeof nestedMeta?.reference === "string" && (nestedMeta.reference as string)) ||
+    "";
+  const statusRaw =
+    (typeof body.status === "string" && body.status) ||
+    (typeof body.type === "string" && body.type) ||
+    (typeof (body.event as Record<string, unknown> | undefined)?.type === "string" &&
+      ((body.event as Record<string, unknown>).type as string)) ||
+    "";
+  if (!reference) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Webhook body must include a reference (invoice number)" } });
+    return;
+  }
+  const confirmedStatuses = new Set(["confirmed", "settled", "complete", "completed", "paid", "charge:confirmed", "invoicesettled", "invoicepaid"]);
+  if (!confirmedStatuses.has(statusRaw.toLowerCase().replace(/[^a-z0-9:]/g, ""))) {
+    res.json({ ok: true, data: { ignored: true, reason: `event "${statusRaw || "(none)"}" is not a payment confirmation` } });
+    return;
+  }
+  const invoice = await prisma.invoice.findUnique({ where: { number: reference }, include: { paymentMethod: true } });
+  if (!invoice) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+  if (!invoice.paymentMethod || !isCryptoType(invoice.paymentMethod.type)) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invoice is not a crypto invoice" } });
+    return;
+  }
+  if (invoice.status === "PAID") {
+    res.json({ ok: true, data: { invoice, payment: null, alreadyPaid: true, note: "Already paid" } });
+    return;
+  }
+  const txHash = typeof body.txHash === "string" && body.txHash.length > 0 ? body.txHash : reference;
+  const refError = cryptoReferenceError(txHash);
+  if (refError) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: refError } });
+    return;
+  }
+  // Provider-verified confirmation: this is a real (non-simulated)
+  // confirmation record — the only path to PAID in provider mode.
+  const paidAt = new Date();
+  const proof = buildProofHash(invoice.number, invoice.amount.toString(), invoice.currency, txHash, paidAt.toISOString());
+  const payment = await prisma.payment.create({
+    data: {
+      invoiceId: invoice.id,
+      method: invoice.paymentMethod.type,
+      amount: invoice.amount,
+      currency: invoice.currency,
+      reference: txHash,
+      status: "CONFIRMED",
+      simulated: false,
+      proofHash: proof,
+    },
+  });
+  const updated = await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: { status: "PAID", paidAt, proofHash: proof },
+  });
+  await sendReceiptEmail(invoice.id);
+  res.json({
+    ok: true,
+    data: { invoice: updated, payment, note: `Confirmed by ${provider} webhook (provider verification, not simulated).` },
+  });
 });

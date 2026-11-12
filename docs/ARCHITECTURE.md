@@ -224,15 +224,72 @@ pattern for anything credential-like.
 
 Same invoice flow, with `CryptoPaymentService` (`services/crypto.ts`):
 
-1. Invoice created for a crypto method → response includes the portal's
-   public address, exact amount, and payment reference.
-2. Customer pays on-chain from their wallet.
-3. Confirmation is **never** the QR scan. It is either:
-   - a provider webhook (BTCPay Server / Coinbase Commerce — see the
-     `// INTEGRATION POINT` in `crypto.ts`), or
-   - an on-chain check, or
-   - Don's manual confirm in the Android app (dev / simulated mode).
-4. Only then is the invoice marked `PAID` and the receipt issued.
+```
+checkout → reference → txHash submit → verify → confirm → PAID
+```
+
+1. **Checkout.** Invoice created for a crypto method → the create
+   response includes `crypto: { currency, address, amount, reference }` —
+   the portal's configured **public address** (never a private key), the
+   exact crypto amount, and the payment reference (the invoice number,
+   e.g. `JAR-1001`). The customer can re-fetch the same details later
+   with `GET /api/invoices/:id/crypto` (customer-scoped). The QR code /
+   barcode only *shows* these details — scanning it never pays anything
+   and never marks anything `PAID`.
+2. **Pay.** Customer sends the exact amount on-chain from their wallet
+   to the address.
+3. **Submit reference.** Customer submits the transaction hash (or
+   provider reference) → `POST /api/payments/:invoiceId/confirm`
+   `{ reference: "<txHash>" }`. The reference must be 64 hex chars
+   (optionally `0x`-prefixed) or a provider reference — anything else
+   is a `400`. Submitting it only **records** a `PENDING` payment; the
+   invoice stays `PENDING`.
+4. **Verify.** The server calls `CryptoPaymentService.verify()`:
+   - *SIMULATED mode* (no provider keys): `verify()` always returns
+     `confirmed: false`. The payment is labelled `simulated: true` and
+     nothing auto-confirms — ever.
+   - *Provider mode* (`BTCPAY_URL` + `BTCPAY_API_KEY` or
+     `COINBASE_COMMERCE_API_KEY`): the provider check is the only path
+     (the `ProviderCryptoService` stub returns unconfirmed until the
+     provider API is wired — see the `// INTEGRATION POINT` in
+     `crypto.ts`).
+5. **Confirm → PAID.** Exactly one of these flips the invoice:
+   - a **provider webhook**: `POST /api/webhooks/crypto/:provider`
+     (BTCPay / Coinbase), HMAC-SHA256 signed with
+     `BTCPAY_WEBHOOK_SECRET` / `COINBASE_WEBHOOK_SECRET`. Creates a
+     `CONFIRMED` payment with `simulated: false`, sets `proofHash` /
+     `paidAt`, queues the receipt email. Idempotent — a replay returns
+     `alreadyPaid: true`.
+   - **Don's manual confirm** (`adminConfirm: true`, ADMIN only) — in
+     SIMULATED mode only. The confirmation is explicitly labelled
+     `SIMULATED` (the `Payment` row and the note both say so). With a
+     provider configured, manual confirm is **refused** with `400`.
+   - a future on-chain check (same `verify()` interface).
+6. **Receipt.** On `PAID` the receipt email is queued (or `SIMULATED`)
+   and the PDF is available at `GET /api/invoices/:id/pdf`.
+
+**Hard rule:** `PAID` requires a confirmation record (a `CONFIRMED`
+`Payment` row). A QR/barcode scan alone never creates one, and a
+customer-submitted txHash alone never creates one. A CUSTOMER passing
+`adminConfirm: true` gets `403` — self-confirming is forbidden, never
+silently ignored.
+
+| Mode | How PAID happens | `Payment.simulated` |
+|---|---|---|
+| SIMULATED (no provider keys) | Don's manual `adminConfirm` only | `true` |
+| Provider (BTCPay / Coinbase keys set) | Signed webhook only | `false` |
+
+**Provider integration (to finish, once Don has keys):** see the
+`// INTEGRATION POINT` block in `services/crypto.ts` — (1) `quote()`
+must call the provider's invoice/charge API and use real exchange
+rates (the simulated fixed rates are fake, for UI testing only);
+(2) `verify()` must query the provider and return `confirmed: true`
+only when the provider reports confirmed/complete; (3) point the
+provider's webhook at `/api/webhooks/crypto/:provider` — the endpoint
+is already implemented and HMAC-verified. Env vars:
+`BTCPAY_URL`, `BTCPAY_API_KEY`, `BTCPAY_WEBHOOK_SECRET`,
+`COINBASE_COMMERCE_API_KEY`, `COINBASE_WEBHOOK_SECRET` (see
+`.env.example`).
 
 ## Invoice / receipt format
 

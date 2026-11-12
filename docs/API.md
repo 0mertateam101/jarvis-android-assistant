@@ -210,18 +210,60 @@ Response: `{ invoice }` (includes `payments`).
 ### `GET /api/invoices/:id/pdf` — customer JWT (own portal) or ADMIN
 Returns the receipt PDF (`application/pdf`, filename `JAR-1001-receipt.pdf`).
 
+### `GET /api/invoices/:id/crypto` — customer JWT (own portal) or ADMIN
+Crypto checkout details for an invoice (re-fetchable after creation —
+the create response only carries them once). Response `200`:
+```json
+{ "crypto": { "currency": "BTC", "address": "<public address>",
+    "amount": "0.00250000", "reference": "JAR-1001",
+    "fiatAmount": "150.00", "fiatCurrency": "USD" },
+  "invoice": { "id": "…", "number": "JAR-1001", "status": "PENDING",
+    "amount": "150.00", "currency": "USD" },
+  "simulated": true }
+```
+`simulated: true` means no provider is configured — the quote uses dev
+rates and Don still has to confirm manually. A non-crypto invoice → `400`.
+Cross-portal customer → `403`; unknown invoice → `404`.
+
 ### `POST /api/payments/:invoiceId/confirm` — customer JWT or ADMIN
-Body: `{ "reference": "txHash / payment_intent / receipt ref", "method": "CASH_APP" }`
+Body: `{ "reference": "txHash / payment_intent / receipt ref", "method": "CASH_APP", "adminConfirm": true }`
 - Fiat/wallet: records the payment; Don's manual confirm (or a Stripe
   webhook — see `payments.ts`) flips the invoice to `PAID`.
-- Crypto: stores the reference and calls `CryptoPaymentService.verify()`.
-  In SIMULATED mode the payment is recorded as `simulated: true` and the
-  invoice stays `PENDING` until Don confirms in the app.
-- Response `200`: `{ invoice, payment }`.
+- Crypto: the `reference` must be a transaction hash (64 hex chars,
+  optionally `0x`-prefixed) or a provider reference — anything else is a
+  `400`. Submitting a txHash only **records** it; the invoice stays
+  `PENDING`. In SIMULATED mode the payment is recorded as
+  `simulated: true` and only Don's manual confirm
+  (`adminConfirm: true`, ADMIN only) flips it to `PAID`, with the
+  confirmation explicitly labelled `SIMULATED`. With a crypto provider
+  configured, manual confirm is refused with `400` — only the provider
+  webhook (below) can confirm.
+- A CUSTOMER passing `adminConfirm: true` gets `403` — self-confirming
+  is forbidden, never silently ignored.
+- Response `200`: `{ invoice, payment, note }`.
 - On `PAID`: `proofHash` is set, `paidAt` is set, and the receipt email
   is queued (or `SIMULATED`).
 
 **Never mark `PAID` on QR/barcode scan alone** — see `docs/ARCHITECTURE.md`.
+
+### `POST /api/webhooks/crypto/:provider` — provider webhook (no JWT)
+`:provider` is `btcpay` or `coinbase`. Authenticated by HMAC-SHA256
+over the raw body: `BTCPay-Sig: sha256=<hex>` or
+`X-CC-Webhook-Signature: <hex>`, using `BTCPAY_WEBHOOK_SECRET` /
+`COINBASE_WEBHOOK_SECRET`. Missing secret → `501`; bad signature → `401`.
+Body:
+```json
+{ "reference": "JAR-1001", "txHash": "<tx hash, optional>",
+  "status": "confirmed" }
+```
+(`status` also accepts `settled` / `complete` / `paid` /
+`charge:confirmed`; a valid signature with a non-confirmation event is
+acknowledged with `{ ignored: true }` and changes nothing.)
+On a confirmed event for a crypto invoice: creates a `CONFIRMED`
+payment with `simulated: false`, marks the invoice `PAID` with a
+`proofHash`, and queues the receipt email. Already `PAID` → `200` with
+`alreadyPaid: true` (idempotent). Unknown invoice → `404`; a non-crypto
+invoice → `400`.
 
 ### `GET /api/portals/:portalId/invoices` — ADMIN (canonical)
 Lists invoices for a portal, newest first. Response: `{ invoices: […] }`.

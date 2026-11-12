@@ -4,7 +4,7 @@ import { prisma } from "../db";
 import { AuthedRequest, authMiddleware } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { generateBarcode } from "../services/barcode";
-import { getCryptoService, isCryptoType } from "../services/crypto";
+import { cryptoMode, getCryptoService, isCryptoType } from "../services/crypto";
 import { barcodeEmailBody, receiptEmailBody, sendEmail } from "../services/email";
 import { generateReceiptPdf, nextInvoiceNumber } from "../services/invoice";
 
@@ -121,6 +121,54 @@ invoicesRouter.get("/:id", authMiddleware, async (req: AuthedRequest, res) => {
     return;
   }
   res.json({ ok: true, data: { invoice: { ...invoice, items: parseItems(invoice.items as unknown as string) } } });
+});
+
+// Crypto checkout details for an invoice — the portal's configured
+// public address + exact crypto amount + payment reference. A returning
+// customer needs this after invoice creation (the create response only
+// carries it once). Same scoping as GET /:id. `simulated: true` means
+// Don still has to confirm manually — the quote uses dev rates and no
+// provider is configured.
+invoicesRouter.get("/:id/crypto", authMiddleware, async (req: AuthedRequest, res) => {
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id }, include: { paymentMethod: true, portal: true } });
+  if (!invoice) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+  if (req.auth!.role === "CUSTOMER" && req.auth!.portalId !== invoice.portalId) {
+    res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
+    return;
+  }
+  if (req.auth!.role === "ADMIN" && invoice.portal.ownerId !== req.auth!.sub) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+  const method = invoice.paymentMethod;
+  if (!method || !isCryptoType(method.type)) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: "Invoice is not a crypto invoice" } });
+    return;
+  }
+  const quote = await getCryptoService().quote({
+    currency: method.type,
+    address: method.handle,
+    fiatAmount: invoice.amount.toString(),
+    fiatCurrency: invoice.currency,
+  });
+  res.json({
+    ok: true,
+    data: {
+      crypto: {
+        currency: quote.currency,
+        address: quote.address,
+        amount: quote.amount,
+        reference: invoice.number,
+        fiatAmount: invoice.amount.toString(),
+        fiatCurrency: invoice.currency,
+      },
+      invoice: { id: invoice.id, number: invoice.number, status: invoice.status, amount: invoice.amount.toString(), currency: invoice.currency },
+      simulated: cryptoMode() === "simulated",
+    },
+  });
 });
 
 invoicesRouter.get("/:id/pdf", authMiddleware, async (req: AuthedRequest, res) => {

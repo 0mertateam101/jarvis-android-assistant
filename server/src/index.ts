@@ -24,7 +24,17 @@ const PORT = Number(process.env.PORT ?? 4000);
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({ origin: process.env.APP_URL ?? "http://localhost:5173", credentials: true }));
-app.use(express.json({ limit: "1mb" }));
+app.use(
+  express.json({
+    limit: "1mb",
+    // Stash the raw body on the request so the crypto provider webhook
+    // (payments.ts) can verify its HMAC-SHA256 signature. No other route
+    // reads it.
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 
 // Rate limits — login is the sensitive one.
 const loginLimiter = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
