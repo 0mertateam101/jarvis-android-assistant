@@ -1,0 +1,86 @@
+# Jarvis — Android APK build (debug) on GitHub Actions.
+#
+# What it does: builds the debug APK for Don's Android control app and
+# uploads it as a downloadable Actions artifact (jarvis-debug-apk), so
+# Don can install it on his phone without Android Studio.
+#
+# Why this runs in Actions: the local machine has no JDK / Android SDK,
+# so no Gradle build can run there. This workflow is the first real build.
+#
+# The Gradle wrapper jar is NOT committed (the tooling used to push code
+# can only push text files, so the binary jar cannot be uploaded). This
+# workflow fetches the official Gradle 8.7 wrapper jar and verifies its
+# SHA-256 before running gradlew — see apps/android/README.md ("Gradle
+# wrapper jar") for the URL and hash.
+#
+# Debug APK only — no release signing, because no signing keys exist.
+# Do NOT add signing here without Don's approval and a real keystore.
+#
+# NOTE: this file cannot be pushed through the GitHub API (403 — the API
+# integration has no workflow scope). Create it through the GitHub web
+# UI: repo → .github/workflows → Add file → Create new file, paste this
+# content, commit to main.
+name: Android APK build (debug)
+
+on:
+  push:
+    paths:
+      - "apps/android/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      # Cache Gradle downloads between runs (wrapper dists + dependency
+      # cache). Keyed on the Gradle version files so a version bump busts it.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-8.7-${{ hashFiles('apps/android/gradle/wrapper/gradle-wrapper.properties', 'apps/android/**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-8.7-
+
+      # The wrapper jar is fetched, never committed — see the header note.
+      # The SHA-256 is the official Gradle 8.7 wrapper jar hash, also
+      # recorded in apps/android/README.md. The build MUST NOT run if the
+      # hash does not match (sha256sum -c fails the step).
+      - name: Fetch Gradle wrapper jar (official Gradle 8.7) and verify SHA-256
+        working-directory: apps/android
+        run: |
+          curl -L -o gradle/wrapper/gradle-wrapper.jar \
+            https://github.com/gradle/gradle/raw/v8.7.0/gradle/wrapper/gradle-wrapper.jar
+          echo "cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8  gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+
+      - name: Build debug APK
+        working-directory: apps/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-debug-apk
+          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
