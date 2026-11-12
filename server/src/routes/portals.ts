@@ -83,6 +83,18 @@ portalsRouter.get("/:id", async (req: AuthedRequest, res) => {
   res.json({ ok: true, data: { portal: full } });
 });
 
+// Canonical invoice list for a portal (see docs/API.md). :id accepts the
+// portal id or slug. ADMIN only (router guard above), owner-scoped.
+portalsRouter.get("/:id/invoices", async (req: AuthedRequest, res) => {
+  const portal = await findOwnedPortal(req.auth!.sub, req.params.id);
+  if (!portal) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
+    return;
+  }
+  const invoices = await prisma.invoice.findMany({ where: { portalId: portal.id }, orderBy: { createdAt: "desc" } });
+  res.json({ ok: true, data: { invoices } });
+});
+
 portalsRouter.patch("/:id", async (req: AuthedRequest, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {

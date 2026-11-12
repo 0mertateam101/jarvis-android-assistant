@@ -32,19 +32,17 @@ function parseItems(raw: string): Array<{ description: string; amount: string }>
   }
 }
 
-invoicesRouter.post("/", authMiddleware, async (req: AuthedRequest, res) => {
+invoicesRouter.post("/", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid body" } });
     return;
   }
-  const portal = await prisma.portal.findUnique({ where: { slug: parsed.data.portalSlug } });
+  // ADMIN only (requireAdmin above — a CUSTOMER token gets 403 here).
+  // The portal must belong to the calling admin.
+  const portal = await prisma.portal.findFirst({ where: { slug: parsed.data.portalSlug, ownerId: req.auth!.sub } });
   if (!portal || portal.status !== "ACTIVE") {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
-    return;
-  }
-  if (req.auth!.role === "CUSTOMER" && req.auth!.portalId !== portal.id) {
-    res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
     return;
   }
   // The chosen method must be assigned to this portal.
@@ -103,17 +101,23 @@ invoicesRouter.post("/", authMiddleware, async (req: AuthedRequest, res) => {
   const emailStatus = await sendEmail({ to: invoice.payerEmail, ...email });
   const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { emailStatus } });
 
-  res.status(201).json({ ok: true, data: { invoice: updated, paymentMethod: method, crypto } });
+  // code128 is the Code128 payload string (same as barcodePayload); qrDataUrl
+  // is the QR image — both returned top-level for the Pay page / printer.
+  res.status(201).json({ ok: true, data: { invoice: updated, paymentMethod: method, crypto, code128: payload, qrDataUrl } });
 });
 
 invoicesRouter.get("/:id", authMiddleware, async (req: AuthedRequest, res) => {
-  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id }, include: { payments: true, paymentMethod: true } });
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id }, include: { payments: true, paymentMethod: true, portal: true } });
   if (!invoice) {
     res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Invoice not found" } });
     return;
   }
   if (req.auth!.role === "CUSTOMER" && req.auth!.portalId !== invoice.portalId) {
     res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
+    return;
+  }
+  if (req.auth!.role === "ADMIN" && invoice.portal.ownerId !== req.auth!.sub) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Invoice not found" } });
     return;
   }
   res.json({ ok: true, data: { invoice: { ...invoice, items: parseItems(invoice.items as unknown as string) } } });
@@ -127,6 +131,10 @@ invoicesRouter.get("/:id/pdf", authMiddleware, async (req: AuthedRequest, res) =
   }
   if (req.auth!.role === "CUSTOMER" && req.auth!.portalId !== invoice.portalId) {
     res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
+    return;
+  }
+  if (req.auth!.role === "ADMIN" && invoice.portal.ownerId !== req.auth!.sub) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Invoice not found" } });
     return;
   }
   const pdf = await generateReceiptPdf({
@@ -167,7 +175,15 @@ export async function sendReceiptEmail(invoiceId: string): Promise<void> {
   await sendEmail({ to: invoice.payerEmail, ...body });
 }
 
-invoicesRouter.get("/portals/:portalId/list", authMiddleware, requireAdmin, async (req, res) => {
-  const invoices = await prisma.invoice.findMany({ where: { portalId: req.params.portalId }, orderBy: { createdAt: "desc" } });
+// Deprecated alias for the canonical GET /api/portals/:portalId/invoices
+// (see portals.ts + docs/API.md). Kept so existing callers keep working.
+// Owner-scoped like the canonical route: unknown / unowned portal → 404.
+invoicesRouter.get("/portals/:portalId/list", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
+  const portal = await prisma.portal.findFirst({ where: { id: req.params.portalId, ownerId: req.auth!.sub } });
+  if (!portal) {
+    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
+    return;
+  }
+  const invoices = await prisma.invoice.findMany({ where: { portalId: portal.id }, orderBy: { createdAt: "desc" } });
   res.json({ ok: true, data: { invoices } });
 });

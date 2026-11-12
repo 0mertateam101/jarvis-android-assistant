@@ -168,7 +168,7 @@ Used by the portal Pay page. No admin data is exposed.
 
 ## Invoices + barcode + payments
 
-### `POST /api/invoices` — customer JWT (or ADMIN)
+### `POST /api/invoices` — ADMIN
 Body:
 ```json
 { "portalSlug": "vip-coaching", "payerEmail": "customer@example.com",
@@ -178,6 +178,9 @@ Body:
 ```
 - Creates invoice `JAR-1001+`, barcode payload
   `JARVIS|JAR-1001|150.00|USD`, QR data URL, queues the barcode email.
+  A CUSTOMER token gets `403` — only Don (ADMIN) creates invoices.
+  The portal must belong to the calling admin, and the payment method
+  must be assigned to that portal (otherwise `400`).
 - Response `201`:
 ```json
 { "invoice": { "id": "…", "number": "JAR-1001", "portalId": "…",
@@ -189,8 +192,14 @@ Body:
     "items": [{ "description": "Coaching — November", "amount": "150.00" }],
     "createdAt": "…" },
   "paymentMethod": { "type": "CASH_APP", "label": "Cash App — APF", "handle": "$MsCarterb" },
-  "crypto": null }
+  "crypto": null,
+  "code128": "JARVIS|JAR-1001|150.00|USD",
+  "qrDataUrl": "data:image/png;base64,…" }
 ```
+- `code128` is the Code128 payload string (same text as
+  `barcodePayload` — the printer encodes it into bars). `qrDataUrl` is
+  the QR image. `emailStatus` is `SIMULATED` unless SMTP is configured,
+  in which case the barcode email is really sent and it is `SENT`.
 - For a crypto method, `crypto` is:
   `{ "currency": "BTC", "address": "<public address>", "amount": "0.0042", "reference": "JAR-1001" }`
   and the invoice is **not** `PAID` until confirmation (see below).
@@ -214,8 +223,12 @@ Body: `{ "reference": "txHash / payment_intent / receipt ref", "method": "CASH_A
 
 **Never mark `PAID` on QR/barcode scan alone** — see `docs/ARCHITECTURE.md`.
 
-### `GET /api/portals/:portalId/invoices` — ADMIN
+### `GET /api/portals/:portalId/invoices` — ADMIN (canonical)
 Lists invoices for a portal, newest first. Response: `{ invoices: […] }`.
+`:portalId` accepts the portal id or slug. Unknown portal (or one Don
+does not own) → `404`.
+- Deprecated alias (kept for existing callers, same behaviour):
+  `GET /api/invoices/portals/:portalId/list` — `:portalId` is the id only.
 
 ---
 

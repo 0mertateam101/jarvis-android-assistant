@@ -23,6 +23,8 @@
     "@types/nodemailer": "^6.4.15",
     "@types/pdfkit": "^0.13.4",
     "@types/qrcode": "^1.5.5",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
     "prisma": "^5.19.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"
