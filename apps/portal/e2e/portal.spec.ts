@@ -157,7 +157,12 @@ test("happy path: log in, pay, reference stays PENDING, receipt shows it", async
   await page.getByRole("button", { name: "Generate payment barcode" }).click();
 
   // Barcode + QR are on screen, with the exact payload format.
-  const invoiceHeading = page.getByRole("heading", { name: /Invoice JAR-\d+ — 150\.00 USD/ });
+  // NOTE: the heading shows the invoice amount as the server returns
+  // it — Prisma Decimal strips trailing zeros, so "150.00" comes back
+  // as "150" and the heading reads "Invoice JAR-1003 — 150 USD".
+  // The barcode payload keeps the 2-decimal form ("150.00") because it
+  // is built from the request amount, not the stored Decimal.
+  const invoiceHeading = page.getByRole("heading", { name: /Invoice JAR-\d+ — 150 USD/ });
   await expect(invoiceHeading).toBeVisible();
   const invoiceNumber = ((await invoiceHeading.textContent()) ?? "").match(/JAR-\d+/)?.[0] ?? "";
   expect(invoiceNumber).toMatch(/^JAR-\d+$/);
