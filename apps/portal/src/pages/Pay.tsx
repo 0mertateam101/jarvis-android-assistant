@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { confirmPayment, createInvoice, getPublicMethods, getSession, type CryptoDetails, type Invoice, type PublicMethod } from "../api";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { DENIAL_MESSAGE, confirmPayment, createInvoice, getPublicMethods, getSession, isDenial, type CryptoDetails, type Invoice, type PublicMethod } from "../api";
 
 // Pay page: pick a method → create invoice → show QR + Code128 barcode
 // (also emailed to the payer by the server) → submit a payment reference
-// → receipt. The invoice is NOT paid by scanning the barcode.
+// → receipt. The invoice is NOT paid by scanning the barcode, and a
+// customer-submitted reference alone never marks it PAID — Don or the
+// payment provider confirms it, and the receipt then shows the proof hash.
 
 export default function Pay() {
   const { slug = "" } = useParams();
@@ -15,16 +17,26 @@ export default function Pay() {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [code128, setCode128] = useState("");
   const [crypto, setCrypto] = useState<CryptoDetails | null>(null);
   const [reference, setReference] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // A customer may only pay on their own portal.
+  const wrongPortal = session !== null && session.slug !== slug;
+
   useEffect(() => {
     if (!session) { navigate("/"); return; }
-    getPublicMethods(slug).then((d) => { setMethods(d.methods); setMethodId(d.methods[0]?.id ?? ""); }).catch(() => setError("Could not load payment methods."));
-  }, [slug, session, navigate]);
+    if (wrongPortal) return;
+    getPublicMethods(slug).then((d) => { setMethods(d.methods); setMethodId(d.methods[0]?.id ?? ""); }).catch((err: unknown) =>
+      setError(isDenial(err) ? DENIAL_MESSAGE : "Could not load payment methods."));
+  }, [slug, session, navigate, wrongPortal]);
+
+  function showError(err: unknown, fallback: string) {
+    setError(isDenial(err) ? DENIAL_MESSAGE : err instanceof Error ? err.message : fallback);
+  }
 
   async function create(e: FormEvent) {
     e.preventDefault(); setError(""); setMessage(""); setBusy(true);
@@ -33,11 +45,11 @@ export default function Pay() {
         portalSlug: slug, payerEmail: session!.email, amount: Number(amount).toFixed(2),
         currency: "USD", items: [{ description, amount: Number(amount).toFixed(2) }], paymentMethodId: methodId,
       });
-      setInvoice(data.invoice); setCrypto(data.crypto);
-      setMessage(data.invoice.emailStatus === "SIMULATED"
-        ? "Barcode generated. Email delivery is simulated in this build (no SMTP configured) — the barcode below is your payment barcode."
-        : "Barcode generated and sent to your email.");
-    } catch (err) { setError(err instanceof Error ? err.message : "Could not create invoice."); }
+      setInvoice(data.invoice); setCrypto(data.crypto); setCode128(data.code128);
+      setMessage(data.invoice.emailStatus === "SENT"
+        ? "Barcode generated and sent to your email."
+        : "Barcode generated. Email delivery is simulated in this build (no SMTP configured) — the barcode below is your payment barcode.");
+    } catch (err) { showError(err, "Could not create invoice."); }
     finally { setBusy(false); }
   }
 
@@ -45,13 +57,21 @@ export default function Pay() {
     e.preventDefault(); setError(""); setBusy(true);
     try {
       const data = await confirmPayment(invoice!.id, reference.trim());
-      setMessage(data.note ?? "Reference recorded. Awaiting confirmation.");
-      if (data.invoice.status === "PAID") navigate(`/receipt/${invoice!.id}`);
-    } catch (err) { setError(err instanceof Error ? err.message : "Could not confirm payment."); }
+      if (data.invoice.status === "PAID") {
+        navigate(`/receipt/${invoice!.id}`);
+      } else {
+        // Reference recorded, invoice stays PENDING until Don or the
+        // provider confirms — the receipt page shows that state, and the
+        // proof of payment appears there once it is confirmed.
+        setInvoice(data.invoice);
+        setMessage(data.note ?? "Reference recorded. Awaiting confirmation — the invoice stays unpaid until Don or the payment provider confirms it.");
+      }
+    } catch (err) { showError(err, "Could not confirm payment."); }
     finally { setBusy(false); }
   }
 
   if (!session) return null;
+  if (wrongPortal) return <p style={{ color: "red" }}>{DENIAL_MESSAGE}</p>;
   const input = { display: "block", width: "100%", padding: 10, margin: "6px 0 12px", fontSize: 16 } as const;
   return (
     <div>
@@ -77,7 +97,7 @@ export default function Pay() {
           <h3>Invoice {invoice.number} — {invoice.amount} {invoice.currency}</h3>
           <p>{message}</p>
           {invoice.barcodeQrDataUrl && <img src={invoice.barcodeQrDataUrl} alt="Payment QR code" width={220} height={220} />}
-          <p>Barcode (Code128): <code>{invoice.barcodePayload}</code></p>
+          <p>Barcode (Code128): <code>{code128 || invoice.barcodePayload}</code></p>
           {crypto && (
             <div style={{ border: "1px solid #ccc", padding: 12, margin: "12px 0" }}>
               <strong>Crypto payment — {crypto.currency}</strong>
@@ -93,7 +113,7 @@ export default function Pay() {
             {error && <p style={{ color: "red" }}>{error}</p>}
             <button type="submit" disabled={busy}>I have paid — submit reference</button>
           </form>
-          <p><a href={`/receipt/${invoice.id}`}>View receipt</a></p>
+          <p><Link to={`/receipt/${invoice.id}`}>View receipt</Link></p>
         </div>
       )}
     </div>

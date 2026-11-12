@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getPublicMethods, getSession, type PublicMethod } from "../api";
+import { DENIAL_MESSAGE, getPublicMethods, getSession, isDenial, type PublicMethod } from "../api";
 
 export default function PortalHome() {
   const { slug = "" } = useParams();
@@ -9,12 +9,19 @@ export default function PortalHome() {
   const [methods, setMethods] = useState<PublicMethod[]>([]);
   const [error, setError] = useState("");
 
+  // A customer may only see their own portal: visiting another portal's
+  // home is a generic denial, never that portal's methods.
+  const wrongPortal = session !== null && session.slug !== slug;
+
   useEffect(() => {
     if (!session) { navigate("/"); return; }
-    getPublicMethods(slug).then((d) => setMethods(d.methods)).catch(() => setError("Could not load payment methods."));
-  }, [slug, session, navigate]);
+    if (wrongPortal) return;
+    getPublicMethods(slug).then((d) => setMethods(d.methods)).catch((err: unknown) =>
+      setError(isDenial(err) ? DENIAL_MESSAGE : "Could not load payment methods."));
+  }, [slug, session, navigate, wrongPortal]);
 
   if (!session) return null;
+  if (wrongPortal) return <p style={{ color: "red" }}>{DENIAL_MESSAGE}</p>;
   return (
     <div>
       <h2>Welcome, {session.email}</h2>

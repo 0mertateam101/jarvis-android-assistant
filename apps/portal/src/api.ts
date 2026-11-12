@@ -14,6 +14,21 @@ export interface Invoice {
 
 export interface CryptoDetails { currency: string; address: string; amount: string; reference: string; }
 
+/** Error from the API that carries the HTTP status, so pages can tell a
+ *  denial (401/403) from any other failure. */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
+}
+
+/** The only message a 401/403 ever shows in the portal: generic, with a
+ *  "contact the portal owner" hint. Never a raw error body, never a reason
+ *  that leaks why access was denied (terminated, blocked, wrong portal). */
+export const DENIAL_MESSAGE = "Access denied. If you believe this is a mistake, contact the portal owner.";
+export function isDenial(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 401 || err.status === 403);
+}
+
 const TOKEN_KEY = "jarvis_customer_token";
 const PORTAL_KEY = "jarvis_portal";
 
@@ -35,7 +50,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers ?? {}) },
   });
   const body = (await res.json().catch(() => ({}))) as { ok?: boolean; data?: T; error?: { message?: string } };
-  if (!res.ok || body.ok === false) throw new Error(body.error?.message ?? `Request failed (${res.status})`);
+  if (!res.ok || body.ok === false) throw new ApiError(res.status, body.error?.message ?? `Request failed (${res.status})`);
   return body.data as T;
 }
 
@@ -63,7 +78,7 @@ export function getPublicMethods(slug: string) {
 }
 
 export function createInvoice(input: { portalSlug: string; payerEmail: string; payerName?: string; amount: string; currency: string; items: { description: string; amount: string }[]; paymentMethodId: string }) {
-  return request<{ invoice: Invoice; paymentMethod: PublicMethod; crypto: CryptoDetails | null }>("/api/invoices", {
+  return request<{ invoice: Invoice; paymentMethod: PublicMethod; crypto: CryptoDetails | null; code128: string; qrDataUrl: string }>("/api/invoices", {
     method: "POST", body: JSON.stringify(input),
   });
 }
@@ -76,6 +91,24 @@ export function confirmPayment(invoiceId: string, reference: string) {
 
 export function getInvoice(id: string) {
   return request<{ invoice: Invoice }>(`/api/invoices/${encodeURIComponent(id)}`);
+}
+
+/** Fetch the receipt PDF with the customer JWT — a plain <a href> would
+ *  send no Authorization header and the server would answer 401. Throws
+ *  ApiError (401/403 → the generic denial) or an Error when the response
+ *  is not a PDF. */
+export async function downloadReceiptPdf(id: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(receiptPdfUrl(id), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new ApiError(res.status, body.error?.message ?? `Request failed (${res.status})`);
+  }
+  const type = res.headers.get("content-type") ?? "";
+  if (!type.includes("application/pdf")) throw new Error("Receipt download did not return a PDF.");
+  return res.blob();
 }
 
 export function receiptPdfUrl(id: string): string { return `${API_URL}/api/invoices/${encodeURIComponent(id)}/pdf`; }

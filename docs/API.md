@@ -168,7 +168,7 @@ Used by the portal Pay page. No admin data is exposed.
 
 ## Invoices + barcode + payments
 
-### `POST /api/invoices` — ADMIN
+### `POST /api/invoices` — ADMIN, or CUSTOMER (own portal only)
 Body:
 ```json
 { "portalSlug": "vip-coaching", "payerEmail": "customer@example.com",
@@ -178,9 +178,12 @@ Body:
 ```
 - Creates invoice `JAR-1001+`, barcode payload
   `JARVIS|JAR-1001|150.00|USD`, QR data URL, queues the barcode email.
-  A CUSTOMER token gets `403` — only Don (ADMIN) creates invoices.
-  The portal must belong to the calling admin, and the payment method
-  must be assigned to that portal (otherwise `400`).
+  An ADMIN creates invoices on portals they own. A CUSTOMER token may
+  create an invoice only for its own portal (`portalSlug` must be the
+  token's portal) and only as itself (`payerEmail` must match the token
+  email) — anything else is a generic `403`; this is the portal Pay page
+  path (Prompt 9). The payment method must be assigned to that portal
+  (otherwise `400`).
 - Response `201`:
 ```json
 { "invoice": { "id": "…", "number": "JAR-1001", "portalId": "…",

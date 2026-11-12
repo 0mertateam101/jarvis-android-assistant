@@ -32,18 +32,36 @@ function parseItems(raw: string): Array<{ description: string; amount: string }>
   }
 }
 
-invoicesRouter.post("/", authMiddleware, requireAdmin, async (req: AuthedRequest, res) => {
+invoicesRouter.post("/", authMiddleware, async (req: AuthedRequest, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid body" } });
     return;
   }
-  // ADMIN only (requireAdmin above — a CUSTOMER token gets 403 here).
-  // The portal must belong to the calling admin.
-  const portal = await prisma.portal.findFirst({ where: { slug: parsed.data.portalSlug, ownerId: req.auth!.sub } });
-  if (!portal || portal.status !== "ACTIVE") {
-    res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
-    return;
+  // ADMIN: the portal must belong to the calling admin (as before).
+  // CUSTOMER (Prompt 9 — the portal Pay page): a portal-scoped customer
+  // may create an invoice ONLY for their own portal and ONLY as
+  // themselves (payerEmail must match the token email). Anything else is
+  // a generic 403 — never a reason that leaks why. The method must still
+  // be assigned to that portal, and the invoice is PENDING until Don or
+  // the provider confirms (see payments.ts — never PAID on creation).
+  let portal;
+  if (req.auth!.role === "ADMIN") {
+    portal = await prisma.portal.findFirst({ where: { slug: parsed.data.portalSlug, ownerId: req.auth!.sub } });
+    if (!portal || portal.status !== "ACTIVE") {
+      res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Portal not found" } });
+      return;
+    }
+  } else {
+    portal = await prisma.portal.findFirst({ where: { slug: parsed.data.portalSlug, id: req.auth!.portalId } });
+    if (!portal || portal.status !== "ACTIVE") {
+      res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
+      return;
+    }
+    if (parsed.data.payerEmail.toLowerCase() !== (req.auth!.email ?? "").toLowerCase()) {
+      res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
+      return;
+    }
   }
   // The chosen method must be assigned to this portal.
   const assignment = await prisma.portalPaymentMethod.findUnique({
