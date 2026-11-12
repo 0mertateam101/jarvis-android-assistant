@@ -277,12 +277,17 @@ does not own) → `404`.
 ## Security — visits, reverse lookup, blocklist
 
 ### `POST /api/security/visit` — public
-Body: `{ "portalSlug": "vip-coaching", "ip": "203.0.113.10", "userAgent": "…", "path": "/pay", "hasAccess": false }`
+Body: `{ "portalSlug": "vip-coaching", "ip": "203.0.113.10", "userAgent": "…", "path": "/pay", "hasAccess": false, "email": "guest@example.com" }`
 - The portal calls this on load; the server also calls it internally for
   unauthenticated hits. `ip` is taken from the request when omitted.
 - If `hasAccess` is false, the server runs the reverse lookup and stores
-  the findings in the `TrafficLog`.
-- Response `201`: `{ log: TrafficLog }`.
+  the findings in the `TrafficLog`. If `email` is supplied, the server
+  verifies the grant itself (ACTIVE grant on this portal, not blocklisted)
+  and ignores the client's `hasAccess` flag.
+- A visit from a blocked IP is still logged, but the response is `403`
+  generic ("Access denied") — the visitor is denied, the attempt stays in
+  the report.
+- Response `201`: `{ log: TrafficLog }`. Unknown portal slug → `404`.
 
 **TrafficLog object:**
 ```json
@@ -298,19 +303,31 @@ On lookup failure, geo fields are `"UNKNOWN"` and `lookupSource` is `"FALLBACK"`
 
 ### `GET /api/security/portals/:portalId/traffic` — ADMIN
 Query: `?hasAccess=false&limit=100`. Response: `{ logs: [TrafficLog, …] }`.
-This is the per-portal security report / project-folder view.
+This is the per-portal security report / project-folder view. The portal
+is owner-scoped (id or slug); an unknown portal, or one Don does not own,
+returns `404`, and a CUSTOMER gets `403`.
 
 ### `POST /api/security/block` — ADMIN
 Body: `{ "portalId": "…", "email": "bad@example.com", "ip": "203.0.113.10", "reason": "Policy violation" }`
 - Creates a `BlockedUser` row and sets that email's grants on the portal
   to `TERMINATED`. Response `201`: `{ blocked: BlockedUser }`.
+- If `portalId` is given (id or slug) it must exist and belong to Don,
+  otherwise `404`. Blocking an email with no grant is allowed — it
+  pre-emptively blocks future invites/logins; nothing is terminated.
 
 ### `GET /api/security/blocked` — ADMIN
 Response: `{ blocked: [BlockedUser, …] }`.
 
 ### `POST /api/security/unblock` — ADMIN
 Body: `{ "blockedId": "…" }` — removes the block (does **not** reactivate
-a `TERMINATED` grant; re-invite is required).
+a `TERMINATED` grant; re-invite is required). Unknown id, or a block on a
+portal Don does not own, returns `404`.
+
+**Blocklist enforcement:** a blocked email or IP is denied everywhere
+with a generic message — login returns `401` `Invalid credentials`
+(never revealing whether the email or the IP was blocked), and payment
+confirm returns `403` with the invoice staying `PENDING`. A blocked payer
+can never pay, even via Don's manual confirm; unblock first, then confirm.
 
 ---
 

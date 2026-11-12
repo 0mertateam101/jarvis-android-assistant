@@ -6,6 +6,7 @@ import { requireAdmin } from "../middleware/requireAdmin";
 import { cryptoMode, cryptoReferenceError, getCryptoService, isCryptoType, verifyWebhookSignature } from "../services/crypto";
 import { buildProofHash } from "../services/invoice";
 import { sendReceiptEmail } from "./invoices";
+import { clientIp, isEmailBlocked, isIpBlocked } from "./security";
 
 // Payment methods (ADMIN) + assignment to portals + payment confirmation.
 // `handle` is a public handle / address only — never a secret or private key.
@@ -249,6 +250,14 @@ paymentsRouter.post("/payments/:invoiceId/confirm", authMiddleware, async (req: 
   }
   if (invoice.status === "PAID") {
     res.json({ ok: true, data: { invoice, payment: null, note: "Already paid" } });
+    return;
+  }
+  // Blocklist enforcement (Prompt 8): a blocked payer can NEVER pay —
+  // generic denial, no payment row is created, the invoice stays PENDING.
+  // This applies to customer and ADMIN confirm alike; unblock first,
+  // then confirm.
+  if ((await isEmailBlocked(invoice.portalId, invoice.payerEmail)) || (await isIpBlocked(clientIp(req), invoice.portalId))) {
+    res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: "Access denied" } });
     return;
   }
   const methodType = invoice.paymentMethod?.type ?? parsed.data.method ?? "UNKNOWN";

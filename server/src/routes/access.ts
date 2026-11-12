@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { AuthedRequest, authMiddleware, signToken } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { generateAccessCode, hashCode, verifyCode } from "../utils/codes";
+import { clientIp, isIpBlocked } from "./security";
 
 // Access grants — the invite / code system.
 // Don enters an email → code generated → email = username, code = password.
@@ -100,6 +101,12 @@ accessRouter.post("/login", async (req, res) => {
   const email = parsed.data.email.toLowerCase();
   // Blocklist + termination FIRST — never reveal why access was denied.
   if (await isBlocked(portal.id, email)) {
+    res.status(401).json(generic);
+    return;
+  }
+  // A blocked IP (global, or for this portal) is denied the same generic
+  // way — the caller cannot tell whether the email or the IP was blocked.
+  if (await isIpBlocked(clientIp(req), portal.id)) {
     res.status(401).json(generic);
     return;
   }
