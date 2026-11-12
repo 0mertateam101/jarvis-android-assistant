@@ -16,9 +16,11 @@
 # NOTE on the compose file: docker-compose.yml bind-mounts ./server:/app,
 # which hides the image's own /app/dist. So the workflow builds dist/ on
 # the host first (npm ci + prisma generate + npm run build in server/)
-# before `docker compose up --build`. The DATABASE_URL / JWT_SECRET /
-# POSTGRES_PASSWORD in docker-compose.yml are throwaway dev values for
-# this test stack only — rotate them before any real deployment.
+# before `docker compose up --build`. docker-compose.yml ships no
+# secrets: this workflow generates throwaway POSTGRES_PASSWORD /
+# JWT_SECRET / DATABASE_URL values per run (see the 'Generate throwaway
+# compose secrets' step). Local runs need them exported first — see
+# docker-compose.yml.
 name: Docker end-to-end check
 
 on:
@@ -28,6 +30,7 @@ on:
       - "server/scripts/docker-e2e-test.sh"
       - "docker-compose.yml"
       - "server/**"
+      - "apps/portal/**"
   workflow_dispatch:
 
 permissions:
@@ -60,6 +63,20 @@ jobs:
         working-directory: apps/portal
         run: npm ci
 
+      # Compose no longer ships a database password (Prompt 14): generate
+      # throwaway secrets for this run only and export them so
+      # `docker compose up` can interpolate them. This step MUST run
+      # before "Start compose stack".
+      - name: Generate throwaway compose secrets
+        run: |
+          PG_PASS="$(openssl rand -hex 16)"
+          JWT="$(openssl rand -hex 32)"
+          {
+            echo "POSTGRES_PASSWORD=${PG_PASS}"
+            echo "JWT_SECRET=${JWT}"
+            echo "DATABASE_URL=postgresql://jarvis:${PG_PASS}@db:5432/jarvis?schema=public"
+          } >> "$GITHUB_ENV"
+
       - name: Start compose stack
         run: docker compose up --build -d
 
@@ -85,6 +102,37 @@ jobs:
           echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
         continue-on-error: true
 
+      - name: Run Playwright portal click test
+        id: playwright
+        working-directory: apps/portal
+        run: |
+          set +e
+          # The API e2e script already built the portal once (step 20) and
+          # stopped its preview; rebuild + serve it again for this spec so
+          # this step is self-contained. @playwright/test is installed by
+          # the earlier "Install portal deps" step (npm ci).
+          VITE_API_URL=http://localhost:4000 npm run build
+          (npx vite preview --port 4173 --strictPort > /tmp/playwright-preview.log 2>&1 & echo $! > /tmp/playwright-preview.pid)
+          for i in $(seq 1 24); do
+            if curl -sf http://localhost:4173/ >/dev/null; then
+              echo "portal preview up after ${i} tries"
+              break
+            fi
+            sleep 5
+          done
+          curl -sf http://localhost:4173/ >/dev/null || { echo "portal preview never came up"; cat /tmp/playwright-preview.log; exit 1; }
+          npx playwright install chromium --with-deps
+          API_URL=http://localhost:4000 npx playwright test 2>&1 | tee /tmp/playwright.log
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Stop portal preview
+        if: always()
+        run: |
+          kill "$(cat /tmp/playwright-preview.pid)" 2>/dev/null || true
+          sleep 2
+          curl -s -m 3 http://localhost:4173/ >/dev/null 2>&1 && echo "preview still running" || echo "preview stopped"
+
       - name: Dump compose logs on failure
         if: steps.e2e.outputs.exit != '0'
         run: docker compose logs --tail=300 server db || true
@@ -107,6 +155,11 @@ jobs:
               echo "**Result: PASS — all Docker e2e checks passed.**"
             else
               echo "**Result: FAIL — exit code ${{ steps.e2e.outputs.exit }}. See the run log linked above.**"
+            fi
+            if [ "${{ steps.playwright.outputs.exit }}" = "0" ]; then
+              echo "**Playwright portal click test: PASS.**"
+            else
+              echo "**Playwright portal click test: FAIL — exit code ${{ steps.playwright.outputs.exit }}. See the run log.**"
             fi
             echo ""
             echo '```'
@@ -139,4 +192,8 @@ jobs:
 
       - name: Fail the job if e2e failed
         if: steps.e2e.outputs.exit != '0'
+        run: exit 1
+
+      - name: Fail the job if Playwright failed
+        if: steps.playwright.outputs.exit != '0'
         run: exit 1
