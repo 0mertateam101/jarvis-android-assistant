@@ -13,8 +13,8 @@ on the phone (in-memory state only — no SharedPreferences, no DataStore).
 |---|---|---|
 | Gradle | 8.7 | `gradle/wrapper/gradle-wrapper.properties` (+ `gradlew`; see "Gradle wrapper jar" below) |
 | Android Gradle Plugin | 8.4.1 | `build.gradle.kts` |
-| Kotlin | 1.9.23 | `build.gradle.kts` |
-| Compose compiler | 1.5.14 | `app/build.gradle.kts` (matches Kotlin 1.9.23) |
+| Kotlin | 1.9.24 | `build.gradle.kts` |
+| Compose compiler | 1.5.14 | `app/build.gradle.kts` (matches Kotlin 1.9.24) |
 | compileSdk / targetSdk | 34 | `app/build.gradle.kts` |
 | minSdk | 26 | `app/build.gradle.kts` |
 | JDK | 17 | `app/build.gradle.kts` (`sourceCompatibility` / `jvmTarget`) |
